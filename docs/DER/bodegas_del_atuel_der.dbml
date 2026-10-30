@@ -1,0 +1,384 @@
+// =============================================================
+// Bodegas del Atuel - DER base (DBML)
+// Pegar en https://dbdiagram.io para ver el diagrama.
+// Los símbolos de las Ref (>, <, -) son un borrador: revisar la
+// cardinalidad de cada relación antes de dar por cerrado el DER.
+// CHECK, UNIQUE de dominio y triggers NO se modelan aquí: van en 002.
+// =============================================================
+
+// ---------- Enumerados ----------
+Enum dia_semana {
+  lunes
+  martes
+  miercoles
+  jueves
+  viernes
+  sabado
+  domingo
+}
+
+Enum tipo_cepa {
+  tinta
+  blanca
+}
+
+Enum tipo_vino {
+  tinto
+  blanco
+  rosado
+  espumante
+}
+
+Enum tipo_cliente {
+  socio
+  distribuidor
+  exportador
+}
+
+Enum tipo_documento {
+  DNI
+  CUIT
+  CUIL
+  PASAPORTE
+}
+
+Enum estado_documento {
+  en_confeccion
+  terminado
+  procesado
+}
+
+// ---------- Localidades y salas ----------
+Table localidad {
+  codigo_postal varchar(8) [pk, note: 'Clave natural. Alfanumérico (ej. M5600)']
+  nombre varchar(100) [not null]
+  provincia varchar(60) [not null]
+  encargado_regional varchar(120) [not null, note: 'Depende de la localidad']
+}
+
+Table sala_venta {
+  id_sala int [pk, increment]
+  calle varchar(100) [not null]
+  numero varchar(10) [not null]
+  dia_cierre dia_semana [not null]
+  codigo_postal varchar(8) [not null]
+}
+
+Table empleado {
+  cuit char(11) [pk, note: 'Dominio CUIT de 11 dígitos']
+  nombre varchar(120) [not null]
+  fecha_ingreso date [not null]
+  salario numeric(12,2) [not null]
+  id_sala int [not null]
+}
+
+// ---------- Producción de uva ----------
+Table departamento {
+  id_departamento int [pk, increment]
+  nombre varchar(60) [not null]
+  provincia varchar(60) [not null]
+  indexes {
+    (nombre, provincia) [unique]
+  }
+}
+
+Table finca {
+  id_finca int [pk, increment]
+  nombre varchar(100) [not null]
+  superficie_ha numeric(10,2) [not null]
+  id_departamento int [not null]
+}
+
+Table cepa {
+  id_cepa int [pk, increment]
+  nombre varchar(60) [not null, unique]
+  tipo tipo_cepa [not null]
+}
+
+Table parcela {
+  id_finca int [not null]
+  nro_parcela int [not null]
+  superficie_ha numeric(10,2) [not null]
+  anio_plantacion smallint [not null]
+  id_cepa int [not null, note: 'Una sola cepa por parcela']
+  indexes {
+    (id_finca, nro_parcela) [pk, note: 'Entidad débil: depende de finca']
+  }
+}
+
+Table lote_uva {
+  id_lote int [pk, increment]
+  id_finca int [not null]
+  nro_parcela int [not null]
+  campania smallint [not null, note: 'Año de cosecha']
+  nro_lote int [not null, unique]
+  fecha_cosecha date [not null]
+  kilos numeric(12,2) [not null]
+  cuit_bodega char(11) [not null, note: 'Bodega a la que se entregó']
+  indexes {
+    (id_finca, nro_parcela, campania) [unique, note: 'RN-04: una cosecha por parcela y campaña']
+  }
+}
+
+Table analisis_calidad {
+  id_analisis int [pk, increment]
+  id_lote int [not null]
+  fecha date [not null]
+  brix numeric(4,2) [not null]
+  ph numeric(3,2) [not null]
+  acidez_total numeric(6,2) [not null, note: 'g/L']
+}
+
+// ---------- Bodegas y vinos ----------
+Table bodega {
+  cuit char(11) [pk]
+  razon_social varchar(150) [not null]
+  domicilio varchar(200) [not null]
+}
+
+Table vino {
+  cod_vino int [pk, increment]
+  nombre varchar(80) [not null]
+  tipo tipo_vino [not null]
+  anada smallint [not null]
+  volumen_ml int [not null]
+  graduacion numeric(4,2) [not null]
+  precio numeric(10,2) [not null, note: 'RN-01: único para toda la red']
+  cuit_bodega char(11) [not null]
+  indexes {
+    (nombre, anada, volumen_ml) [unique]
+  }
+}
+
+Table vino_cepa {
+  cod_vino int
+  id_cepa int
+  porcentaje numeric(5,2) [not null, note: 'Suma 100 por vino (RN-05)']
+  indexes {
+    (cod_vino, id_cepa) [pk]
+  }
+}
+
+// Trazabilidad: qué lotes de uva componen cada vino (N:M).
+// Regla cruzada (trigger): el lote debe haber sido entregado a la
+// bodega que elabora el vino (lote_uva.cuit_bodega = vino.cuit_bodega).
+Table vino_lote {
+  cod_vino int
+  id_lote int
+  indexes {
+    (cod_vino, id_lote) [pk]
+  }
+}
+
+Table maridaje {
+  id_maridaje int [pk, increment]
+  nombre varchar(60) [not null, unique]
+  temperatura_servicio smallint [not null, note: '°C']
+}
+
+Table vino_maridaje {
+  cod_vino int
+  id_maridaje int
+  indexes {
+    (cod_vino, id_maridaje) [pk]
+  }
+}
+
+// ---------- Clientes (supertipo + subtipos) ----------
+Table cliente {
+  id_cliente int [pk, increment]
+  apellido_razon_social varchar(150) [not null]
+  nombre varchar(100) [note: 'Vacío si es razón social']
+  tipo_documento tipo_documento [not null]
+  nro_documento varchar(11) [not null]
+  direccion varchar(200) [not null]
+  codigo_postal varchar(8) [not null]
+  fecha_alta date [not null, default: `CURRENT_DATE`]
+  tipo_cliente tipo_cliente [not null, note: 'Discriminador. El descuento NO se almacena: fn_descuento_cliente']
+  indexes {
+    (tipo_documento, nro_documento) [unique]
+  }
+}
+
+Table cliente_distribuidor {
+  id_cliente int [pk]
+  zona_cobertura varchar(120) [not null]
+  nro_habilitacion varchar(30) [not null, unique]
+}
+
+Table cliente_exportador {
+  id_cliente int [pk]
+  pais_destino varchar(60) [not null]
+}
+
+Table permiso_exportacion {
+  id_cliente int
+  codigo varchar(20)
+  fecha_emision date [not null]
+  fecha_vencimiento date [not null, note: 'RN-07: debe ser posterior a fecha_emision']
+  indexes {
+    (id_cliente, codigo) [pk]
+  }
+}
+
+// ---------- Ventas ----------
+Table comprobante {
+  nro_comprobante int [pk, increment]
+  fecha date [not null, default: `CURRENT_DATE`]
+  id_cliente int [not null]
+  id_sala int [not null]
+  subtotal numeric(12,2) [not null, note: 'Derivado: lo calcula fn_total_comprobante / trigger']
+  descuento numeric(12,2) [not null]
+  total numeric(12,2) [not null, note: 'RN-08: no se carga a mano']
+}
+
+Table renglon_comprobante {
+  nro_comprobante int
+  cod_vino int
+  cantidad int [not null]
+  precio_unitario numeric(10,2) [not null, note: 'Snapshot del precio al momento de la venta']
+  descuento_pct numeric(5,2) [not null, note: 'Snapshot del descuento aplicado']
+  subtotal numeric(12,2) [not null]
+  indexes {
+    (nro_comprobante, cod_vino) [pk]
+  }
+}
+
+// ---------- Transportistas ----------
+Table transportista {
+  cod_transportista int [pk, increment]
+  razon_social varchar(150) [not null]
+  cuit char(11) [not null, unique]
+  email varchar(120) [not null]
+  telefono varchar(30) [not null]
+  domicilio varchar(200) [not null]
+}
+
+Table transportista_localidad {
+  cod_transportista int
+  codigo_postal varchar(8)
+  indexes {
+    (cod_transportista, codigo_postal) [pk]
+  }
+}
+
+// ---------- Ingresos al depósito central ----------
+Table ingreso {
+  cod_ingreso int [pk, increment]
+  fecha date [not null]
+  estado estado_documento [not null, default: 'en_confeccion']
+  cod_transportista int [not null]
+  cuit_bodega char(11) [not null, note: 'Bodega de origen']
+}
+
+Table renglon_ingreso {
+  cod_ingreso int
+  cod_vino int
+  cantidad int [not null]
+  indexes {
+    (cod_ingreso, cod_vino) [pk]
+  }
+}
+
+// ---------- Transferencias a salas ----------
+Table transferencia {
+  nro_transferencia int [pk, increment]
+  id_sala int [not null, note: 'Sala solicitante']
+  fecha_confeccion date [not null, default: `CURRENT_DATE`, note: 'RN-11: no modificable']
+  estado estado_documento [not null, default: 'en_confeccion']
+}
+
+Table renglon_transferencia {
+  nro_transferencia int
+  cod_vino int
+  cantidad int [not null]
+  indexes {
+    (nro_transferencia, cod_vino) [pk]
+  }
+}
+
+// ---------- Stock ----------
+Table stock_sala {
+  id_sala int
+  cod_vino int
+  cantidad int [not null, default: 0, note: 'CHECK cantidad >= 0 (RN-09)']
+  indexes {
+    (id_sala, cod_vino) [pk]
+  }
+}
+
+Table stock_deposito {
+  cod_vino int [pk]
+  cantidad int [not null, default: 0, note: 'CHECK cantidad >= 0']
+}
+
+// ---------- Auditoría ----------
+Table auditoria_precio {
+  id_auditoria int [pk, increment]
+  cod_vino int [not null]
+  precio_anterior numeric(10,2) [not null]
+  precio_nuevo numeric(10,2) [not null]
+  fecha_hora timestamp [not null, default: `now()`]
+  usuario varchar(63) [not null, default: `current_user`]
+}
+
+// =============================================================
+// Relaciones (revisar cardinalidad)
+// > = muchos a uno | - = uno a uno
+// =============================================================
+
+// Localidades y salas
+Ref: sala_venta.codigo_postal > localidad.codigo_postal
+Ref: empleado.id_sala > sala_venta.id_sala
+
+// Producción
+Ref: finca.id_departamento > departamento.id_departamento
+Ref: parcela.id_finca > finca.id_finca
+Ref: parcela.id_cepa > cepa.id_cepa
+Ref: lote_uva.(id_finca, nro_parcela) > parcela.(id_finca, nro_parcela)
+Ref: lote_uva.cuit_bodega > bodega.cuit
+Ref: analisis_calidad.id_lote > lote_uva.id_lote
+
+// Vinos
+Ref: vino.cuit_bodega > bodega.cuit
+Ref: vino_cepa.cod_vino > vino.cod_vino
+Ref: vino_cepa.id_cepa > cepa.id_cepa
+Ref: vino_maridaje.cod_vino > vino.cod_vino
+Ref: vino_maridaje.id_maridaje > maridaje.id_maridaje
+Ref: vino_lote.cod_vino > vino.cod_vino
+Ref: vino_lote.id_lote > lote_uva.id_lote
+
+// Clientes (jerarquía)
+Ref: cliente.codigo_postal > localidad.codigo_postal
+Ref: cliente_distribuidor.id_cliente - cliente.id_cliente
+Ref: cliente_exportador.id_cliente - cliente.id_cliente
+Ref: permiso_exportacion.id_cliente > cliente_exportador.id_cliente
+
+// Ventas
+Ref: comprobante.id_cliente > cliente.id_cliente
+Ref: comprobante.id_sala > sala_venta.id_sala
+Ref: renglon_comprobante.nro_comprobante > comprobante.nro_comprobante
+Ref: renglon_comprobante.cod_vino > vino.cod_vino
+
+// Transportistas
+Ref: transportista_localidad.cod_transportista > transportista.cod_transportista
+Ref: transportista_localidad.codigo_postal > localidad.codigo_postal
+
+// Ingresos
+Ref: ingreso.cod_transportista > transportista.cod_transportista
+Ref: ingreso.cuit_bodega > bodega.cuit
+Ref: renglon_ingreso.cod_ingreso > ingreso.cod_ingreso
+Ref: renglon_ingreso.cod_vino > vino.cod_vino
+
+// Transferencias
+Ref: transferencia.id_sala > sala_venta.id_sala
+Ref: renglon_transferencia.nro_transferencia > transferencia.nro_transferencia
+Ref: renglon_transferencia.cod_vino > vino.cod_vino
+
+// Stock
+Ref: stock_sala.id_sala > sala_venta.id_sala
+Ref: stock_sala.cod_vino > vino.cod_vino
+Ref: stock_deposito.cod_vino > vino.cod_vino
+
+// Auditoría
+Ref: auditoria_precio.cod_vino > vino.cod_vino
