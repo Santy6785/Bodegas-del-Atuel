@@ -1,0 +1,318 @@
+/* ==========================================================================
+   Bodegas del Atuel - Estilos Base del Frontend
+   ========================================================================== */
+
+:root {
+  /* Paleta cromática: temática vitivinícola sobria */
+  --color-primary: #6b1d2f;        /* Bordó vino tinto principal */
+  --color-primary-hover: #541423;  /* Bordó oscuro */
+  --color-primary-light: #8e2b42;  /* Bordó claro / rubí */
+  --color-primary-bg: #fdf5f6;     /* Fondo suave con tinte vino */
+
+  --color-bg: #f9f8f8;             /* Fondo de página */
+  --color-surface: #ffffff;        /* Fondo de tarjetas y contenedores */
+  --color-border: #e2dbdd;         /* Bordes tenues */
+
+  --color-text: #2c2527;           /* Texto principal */
+  --color-text-muted: #6b6365;     /* Texto secundario / gris */
+
+  /* Estados: éxito, error, carga */
+  --color-success: #1e7e45;
+  --color-success-bg: #eafaf1;
+  --color-success-border: #a3e4d7;
+
+  --color-error: #a8232e;
+  --color-error-bg: #fdeced;
+  --color-error-border: #f5b7b1;
+
+  --color-loading: #b7791f;
+  --color-loading-bg: #fef9e7;
+  --color-loading-border: #f9e79f;
+
+  /* Tipografía y espaciado */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --spacing-xs: 0.25rem;
+  --spacing-sm: 0.5rem;
+  --spacing-md: 1rem;
+  --spacing-lg: 1.5rem;
+  --spacing-xl: 2rem;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.08);
+}
+
+/* Reset básico */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  line-height: 1.5;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Encabezado y Navegación */
+header.app-header {
+  background-color: var(--color-surface);
+  border-bottom: 2px solid var(--color-primary);
+  box-shadow: var(--shadow-sm);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.header-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: var(--spacing-md) var(--spacing-lg);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+}
+
+.brand-wrapper {
+  display: flex;
+  align-items: baseline;
+  gap: var(--spacing-sm);
+}
+
+.brand-title {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--color-primary);
+  text-decoration: none;
+  letter-spacing: -0.02em;
+}
+
+.brand-subtitle {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+
+nav.main-nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+nav.main-nav a {
+  text-decoration: none;
+  color: var(--color-text);
+  font-size: 0.95rem;
+  font-weight: 500;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  transition: all 0.15s ease-in-out;
+}
+
+nav.main-nav a:hover {
+  background-color: var(--color-primary-bg);
+  color: var(--color-primary);
+}
+
+nav.main-nav a.active {
+  background-color: var(--color-primary);
+  color: #ffffff;
+}
+
+/* Indicador de estado de la API */
+.api-status-wrapper {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  font-size: 0.85rem;
+}
+
+.api-status-label {
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.api-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 9999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  transition: all 0.2s ease-in-out;
+  border: 1px solid transparent;
+  max-width: 280px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.api-status::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.api-status.loading {
+  background-color: var(--color-loading-bg);
+  color: var(--color-loading);
+  border-color: var(--color-loading-border);
+}
+.api-status.loading::before {
+  background-color: var(--color-loading);
+}
+
+.api-status.success {
+  background-color: var(--color-success-bg);
+  color: var(--color-success);
+  border-color: var(--color-success-border);
+}
+.api-status.success::before {
+  background-color: var(--color-success);
+}
+
+.api-status.error {
+  background-color: var(--color-error-bg);
+  color: var(--color-error);
+  border-color: var(--color-error-border);
+}
+.api-status.error::before {
+  background-color: var(--color-error);
+}
+
+/* Contenedor Principal */
+main#app {
+  flex: 1;
+  max-width: 1200px;
+  width: 100%;
+  margin: 0 auto;
+  padding: var(--spacing-xl) var(--spacing-lg);
+}
+
+/* Placeholders y Tarjetas */
+.placeholder-card,
+.card {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-xl);
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.placeholder-card h2,
+.card h2 {
+  color: var(--color-primary);
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.placeholder-card p,
+.card p {
+  color: var(--color-text-muted);
+  font-size: 1rem;
+}
+
+.badge {
+  display: inline-block;
+  align-self: flex-start;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.badge-info {
+  background-color: var(--color-primary-bg);
+  color: var(--color-primary);
+  border: 1px solid var(--color-primary-light);
+}
+
+.error-card {
+  border-left: 4px solid var(--color-error);
+}
+
+.btn-link {
+  display: inline-block;
+  align-self: flex-start;
+  margin-top: var(--spacing-sm);
+  color: var(--color-primary);
+  text-decoration: underline;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.btn-link:hover {
+  color: var(--color-primary-hover);
+}
+
+/* Clases utilitarias de estado */
+.error {
+  color: var(--color-error);
+  background-color: var(--color-error-bg);
+  border-color: var(--color-error-border);
+}
+
+.success {
+  color: var(--color-success);
+  background-color: var(--color-success-bg);
+  border-color: var(--color-success-border);
+}
+
+.loading {
+  color: var(--color-loading);
+  background-color: var(--color-loading-bg);
+  border-color: var(--color-loading-border);
+}
+
+/* Pie de página */
+footer.app-footer {
+  background-color: var(--color-surface);
+  border-top: 1px solid var(--color-border);
+  padding: var(--spacing-md) var(--spacing-lg);
+  margin-top: auto;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+
+.footer-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .header-container {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  nav.main-nav {
+    justify-content: flex-start;
+    overflow-x: auto;
+    padding-bottom: var(--spacing-xs);
+  }
+
+  .api-status-wrapper {
+    align-self: flex-start;
+  }
+}

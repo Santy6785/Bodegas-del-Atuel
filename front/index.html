@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bodegas del Atuel - Sistema de Gestión</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <!-- config.js debe cargarse primero como script clásico para definir window.APP_CONFIG -->
+  <script src="config.js"></script>
+  <!-- Punto de entrada modular de la aplicación -->
+  <script type="module" src="js/main.js"></script>
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-container">
+      <div class="brand-wrapper">
+        <a href="#/vinos" class="brand-title">Bodegas del Atuel</a>
+        <span class="brand-subtitle">Gestión y Distribución</span>
+      </div>
+
+      <nav class="main-nav" aria-label="Navegación principal">
+        <a href="#/vinos">Vinos</a>
+        <a href="#/vinos/nuevo">Nuevo Vino</a>
+        <a href="#/ventas/nueva">Nueva Venta</a>
+        <a href="#/transferencias">Transferencias</a>
+        <a href="#/tablero">Tablero</a>
+      </nav>
+
+      <div class="api-status-wrapper">
+        <span class="api-status-label">API:</span>
+        <span id="api-status" class="api-status loading">Conectando...</span>
+      </div>
+    </div>
+  </header>
+
+  <main id="app">
+    <!-- El contenido de cada vista se renderizará dinámicamente mediante el router -->
+  </main>
+
+  <footer class="app-footer">
+    <div class="footer-container">
+      <span>Bodegas del Atuel &copy; 2026 - TPI Bases de Datos (UTN FRSR)</span>
+      <span>Capa Frontend (Etapa 7)</span>
+    </div>
+  </footer>
+</body>
+</html>
