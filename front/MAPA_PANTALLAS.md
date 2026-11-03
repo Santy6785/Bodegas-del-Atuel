@@ -246,3 +246,68 @@ Administrar las solicitudes de reposición de botellas de vino desde el depósit
 - No incrementa saldos en la sala solicitante.
 - No decide si una transferencia es válida para procesarse sin consultar el estado retornado por el servidor.
 
+---
+
+### 5. Tablero de Control (Dashboard)
+
+#### a) Objetivo
+Brindar al personal de gestión y supervisión una vista ejecutiva con indicadores clave de negocio: ranking de vinos con mayor volumen de comercialización, recaudación trimestral segmentada por sala de venta y detección temprana de quiebres de stock.
+
+#### b) Datos que muestra y datos que envía
+- **Widget 1: Top 10 Vinos Más Vendidos:**
+  - *Datos que envía:* Parámetro de límite (ej. `limite=10`).
+  - *Datos que muestra:* Ranking ordenado del 1 al 10 con nombre del vino, añada, cantidad de botellas vendidas e importe acumulado.
+- **Widget 2: Ventas por Sala en el Último Trimestre:**
+  - *Datos que envía:* Rango temporal o parámetro de período (ej. `fecha_desde` y `fecha_hasta` o `trimestre=ultimo`).
+  - *Datos que muestra:* Gráfico de barras comparativo y tabla resumen con Sala de Venta (`nombre`) vs. Total Facturado en Pesos (`total_ventas`).
+- **Widget 3: Vinos Sin Stock en Sala:**
+  - *Datos que envía:* `sala_id` (number, identificador de la sala seleccionada en el combo).
+  - *Datos que muestra:* Listado de vinos cuyo saldo disponible en esa sala es igual a 0 botellas (ej. *"Merlot (375ml) - 0 botellas"*, *"Syrah - 0 botellas"*).
+
+#### c) Tabla de Endpoints y Mapeo
+| Dato / Acción | Endpoint | Método | Parámetros | Campo en Respuesta | Función en `front/js/api/` | Origen |
+|---|---|---|---|---|---|---|
+| Ranking de vinos más vendidos | `/reportes/top-vinos` | `GET` | **Query:** `limite=10` | Array `[{ cod_vino, nombre, total_vendido, recaudacion }]` | `topVinos(params)` en `reportes.js` | Enunciado / Boceto #5 |
+| Recaudación por sala (trimestre) | `/reportes/ventas-por-sala` | `GET` | **Query:** `fecha_desde`, `fecha_hasta` | Array `[{ id_sala, nombre_sala, total_facturado }]` | `ventasPorSala(params)` en `reportes.js` | Enunciado / Boceto #5 |
+| Consulta de vinos agotados por sala | `/reportes/vinos-sin-stock` | `GET` | **Query:** `sala_id` | Array `[{ cod_vino, nombre, volumen_ml, cantidad: 0 }]` | `vinosSinStock(params)` en `reportes.js` | Enunciado / Boceto #5 |
+| Selector de salas para filtrado de quiebres | `/salas` | `GET` | Ninguno | Array de salas `[{ id_sala, nombre }]` | `listarSalas()` *(función sugerida)* | **PROPUESTO** |
+
+#### d) Flujo Paso a Paso
+1. Al acceder al Tablero, se disparan en paralelo las peticiones para el Top 10 (`GET /reportes/top-vinos?limite=10`), las ventas trimestrales (`GET /reportes/ventas-por-sala`) y el catálogo de salas (`GET /salas`).
+2. Se dibuja el listado del Top 10 con los totales devueltos.
+3. Se renderiza el gráfico de barras comparativo de ventas por sala utilizando las alturas proporcionales de las barras calculadas visualmente según el valor de recaudación enviado por el servidor.
+4. El selector de salas del Widget 3 se inicializa por defecto con la primera sala disponible y se ejecuta `vinosSinStock({ sala_id })`.
+5. Si el usuario cambia la sala en el selector, se dispara nuevamente `vinosSinStock({ sala_id: nuevoId })` y se actualiza dinámicamente la lista de productos agotados.
+
+#### e) Errores Esperables y Tratamiento
+| Escenario de Error | Regla / Restricción | SQLSTATE | HTTP Status | Tratamiento en Frontend |
+|---|---|---|---|---|
+| Sala inválida o inexistente en filtro de stock | Identificador fuera de catálogo | `22P02` o `P0002` | `400 Bad Request` o `404 Not Found` | Muestra el error de la API dentro de la tarjeta de vinos sin stock. |
+| Rango de fechas inconsistente | Parámetros temporales invertidos | Lógica de consulta | `422 Unprocessable Entity` | Muestra el mensaje del backend indicando período erróneo. |
+| Falla general de base de datos | Timeout o indisponibilidad | `40001` / `57P01` | `500 Internal Server Error` / `503` | Se expone el mensaje de la API y se ofrece un botón de recarga puntual por widget. |
+
+#### f) Qué NO calcula el Front
+- No suma las ventas de cada comprobante para armar los acumulados ni las posiciones del ranking; el cálculo proviene de consultas SQL con `SUM(rc.subtotal)`, `GROUP BY` y `ORDER BY ... DESC LIMIT 10`.
+- No agrupa ventas por trimestre ni discrimina fechas en el cliente; el backend procesa la vista o consulta agregada (`S8`).
+- No filtra el inventario localmente para deducir qué vinos tienen stock en 0; la vista `S9` o endpoint `/reportes/vinos-sin-stock` ejecuta la condición `stock_sala.cantidad = 0` directamente en la base de datos.
+
+---
+
+## 🗂️ Datos Auxiliares (Lookups)
+
+Para que los componentes de selección (selectores desplegables y búsquedas en combos) funcionen sin valores fijos en el código, el frontend requiere consumir endpoints de catálogo/lookup.
+
+La tabla siguiente define el estado de cada catálogo requerido por la interfaz:
+
+| Catálogo / Lookup | Uso en Pantallas | Endpoint | Estado | Función en `front/js/api/` | Justificación y Observaciones |
+|---|---|---|---|---|---|
+| **Cepas** | - Catálogo (Filtro)<br>- Alta/Edición de Vino (Composición) | `GET /cepas` | **PROPUESTO / FALTANTE** | `listarCepas()` | Necesario para seleccionar cepas al armar la mezcla (%) de un vino o filtrar el catálogo. No figura en la lista mínima del enunciado. |
+| **Bodegas** | - Catálogo (Filtro)<br>- Alta/Edición de Vino | `GET /bodegas` | **PROPUESTO / FALTANTE** | `listarBodegas()` | Permite asociar el vino con la bodega elaboradora (`cuit_bodega`). No figura en los mínimos del enunciado. |
+| **Salas de Venta** | - Nueva Venta<br>- Transferencias (Solicitante)<br>- Tablero (Filtro stock) | `GET /salas` | **PROPUESTO / FALTANTE** | `listarSalas()` | Esencial para asignar comprobantes a su punto de venta y direccionar transferencias. No figura en los mínimos del enunciado. |
+| **Maridajes** | - Detalle de Vino (Catálogo)<br>- Alta de Maridajes | `GET /maridajes` | **PROPUESTO / FALTANTE** | `listarMaridajes()` | Requerido si se desea asociar o consultar maridajes formalmente. No figura en los mínimos del enunciado. |
+| **Tipos de Vino** | - Catálogo (Filtro)<br>- Alta/Edición de Vino | *Enum local o* `GET /catalogos/tipos-vino` | **PROPUESTO** | `listarTiposVino()` | Se basa en el enum de BD (`tinto`, `blanco`, `rosado`, `espumoso`, RN-15). Puede consumirse de endpoint o inferirse del estándar cerrado del dominio. |
+| **Clientes** | - Nueva Venta | `GET /clientes` | **EXISTENTE (Enunciado)** | `listarClientes(filtros)` en `clientes.js` | Devuelve clientes (socios, distribuidores, exportadores) para vincular al comprobante. |
+| **Vinos (Activos)** | - Nueva Venta (Renglones)<br>- Transferencias (Renglones) | `GET /vinos` | **EXISTENTE (Enunciado)** | `listarVinos(filtros)` en `vinos.js` | Se utiliza para autocompletar la selección de botellas a vender o transferir. |
+| **Historial de Transferencias** | - Transferencias (Grilla) | `GET /transferencias` | **PROPUESTO / FALTANTE** | `listarTransferencias(filtros)` | El boceto de la pantalla #4 exige listar las transferencias existentes y sus estados (`en_confeccion`, `terminado`, `procesado`). El enunciado solo incluye `POST` para el circuito. |
+
+
