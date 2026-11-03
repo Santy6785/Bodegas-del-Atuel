@@ -126,3 +126,123 @@ Registrar nuevos vinos en el catálogo comercial o modificar los atributos y cor
 #### f) Qué NO calcula el Front
 - No valida de forma excluyente si los porcentajes suman 100 ni bloquea el envío si la suma difiere; la regla de integridad de negocio es potestad exclusiva del constraint trigger en PostgreSQL.
 - No genera el identificador del vino (`cod_vino`), ya que es una secuencia/identidad subrogada gestionada por la base de datos.
+
+---
+
+### 3. Nueva Venta
+
+#### a) Objetivo
+Registrar la emisión de un comprobante de venta de vinos a un cliente determinado en una sala de venta específica, enviando los renglones correspondientes y mostrando el detalle final liquidado por el servidor.
+
+#### b) Datos que muestra y datos que envía
+- **Datos que envía (Confección del comprobante):**
+  - `id_cliente` (number, cliente seleccionado: socio, distribuidor o exportador).
+  - `id_sala` (number, sala de venta física donde se realiza la transacción).
+  - `renglones` (array de ítems vendidos): lista de objetos `[{ cod_vino: number, cantidad: number }]`.
+- **Datos que muestra:**
+  - Selector de clientes (con búsqueda o listado de socios, distribuidores y exportadores).
+  - Selector de sala de venta.
+  - Grilla interactiva de selección de vino y cantidad para conformar el carrito antes del envío.
+  - Tabla de liquidación del comprobante emitido:
+    - Columnas: Nombre de Vino, Cantidad, Precio Unitario histórico (snapshot), Porcentaje de descuento aplicado (`% Desc.`), Subtotal por renglón.
+  - Resumen financiero consolidado:
+    - **Subtotal bruto** (suma de precios de lista).
+    - **Descuento total** (bonificación global calculada según categoría de cliente).
+    - **TOTAL A PAGAR** (importe neto liquidado).
+  - Alerta de error en caso de rechazo por stock insuficiente (RN-09).
+
+#### c) Tabla de Endpoints y Mapeo
+| Dato / Acción | Endpoint | Método | Parámetros | Campo en Respuesta | Función en `front/js/api/` | Origen |
+|---|---|---|---|---|---|---|
+| Registrar y emitir el comprobante | `/comprobantes` | `POST` | **Body:** `{ id_cliente, id_sala, renglones: [{ cod_vino, cantidad }] }` | Comprobante emitido con `nro_comprobante` asignado | `crearComprobante(data)` en `comprobantes.js` | Enunciado / Bocetos |
+| Consultar detalle liquidado del comprobante | `/comprobantes/{nro}` | `GET` | **Ruta:** `nro` (nro_comprobante) | Objeto con cabecera (`subtotal`, `descuento`, `total`, `fecha`) y array `renglones` (`precio_unitario`, `descuento_pct`, `subtotal`) | `obtenerComprobante(nro)` en `comprobantes.js` | Enunciado / Bocetos |
+| Selector de clientes | `/clientes` | `GET` | Ninguno o `params` | Array de clientes `[{ id_cliente, tipo_cliente, apellido_razon_social, nombre }]` | `listarClientes(filtros)` en `clientes.js` | Enunciado |
+| Selector de salas de venta | `/salas` | `GET` | Ninguno | Array de salas `[{ id_sala, nombre, codigo_postal }]` | `listarSalas()` *(función sugerida)* | **PROPUESTO** (No listado en mínimos) |
+| Selector de vinos disponibles para venta | `/vinos` | `GET` | Ninguno o filtros | Array de vinos con `cod_vino`, `nombre`, `precio` | `listarVinos()` en `vinos.js` | Enunciado |
+
+#### d) Flujo Paso a Paso
+1. Al acceder a la pantalla, se cargan los selectores de Clientes (`GET /clientes`), Salas de venta (`GET /salas`) y el catálogo de Vinos disponibles (`GET /vinos`).
+2. El operador selecciona el cliente y la sala de venta física.
+3. El operador elige un vino, ingresa la cantidad deseada y pulsa *"Agregar"*, acumulando los pares `(cod_vino, cantidad)` en una lista local temporal de ítems para el comprobante.
+4. Al hacer clic en *"Confirmar Venta"*, el front invoca `crearComprobante({ id_cliente, id_sala, renglones })`.
+5. Si la operación es exitosa, se consulta inmediatamente `obtenerComprobante(nro)` para recuperar el comprobante final con todos los cálculos oficiales de la base de datos y se presenta en pantalla el detalle liquidado (Subtotal, Descuento Total y Total a Pagar).
+6. Si ocurre un fallo (ej. stock insuficiente en la sala), la API responde con error `409` y el mensaje de regla de negocio devuelto se expone de forma directa y visible.
+
+#### e) Decisión de Diseño: Sin Vista Previa de Cálculos en el Cliente
+> [!IMPORTANT]
+> **Decisión arquitectónica adoptada:** El frontend **NO** calcula previamente subtotales, bonificaciones ni el importe final a pagar.
+> Debido a que la política del proyecto prohíbe replicar la lógica de negocio en el cliente, el front se limita a enviar la estructura `(id_cliente, id_sala, renglones)` a `POST /comprobantes`. El cálculo del descuento por tipo de cliente (RN-06), el precio unitario del momento y los subtotales/totales (RN-08) son computados íntegramente por los triggers y funciones de la base de datos.
+> La visualización de los importes finales liquidados se obtiene una vez creado el documento mediante la respuesta de creación o consultando `GET /comprobantes/{nro}`.
+
+#### f) Errores Esperables y Tratamiento
+| Escenario de Error | Regla / Restricción | SQLSTATE | HTTP Status | Tratamiento en Frontend |
+|---|---|---|---|---|
+| Stock insuficiente de uno o más vinos en la sala | **RN-09** (`CHECK stock >= 0` o trigger de validación de existencias en sala) | `P0001` (Raise Exception) o `23514` | `409 Conflict` | Se expone en alerta el mensaje exacto del servidor: *"Stock insuficiente del vino [Nombre] en la sala [ID]! Venta rechazada."* |
+| Cliente inexistente o dado de baja | Restricción de clave foránea `FK_comprobante_cliente` | `23503` | `422 Unprocessable Entity` | Se muestra el mensaje devuelto por la API. |
+| Sala inexistente | Restricción de clave foránea `FK_comprobante_sala` | `23503` | `422 Unprocessable Entity` | Se muestra el mensaje devuelto por la API. |
+| Cantidad vendida menor o igual a cero | Validación de dominio en renglón (`cantidad > 0`) | `23514` | `422 Unprocessable Entity` | Se muestra el mensaje devuelto por la API. |
+| Bloqueo concurrente por alta demanda en sala | Concurrencia transaccional / serialización | `40001` o `40P01` | `503 Service Unavailable` | Mensaje de reintento de operación devuelto por el backend. |
+
+#### g) Qué NO calcula el Front
+- No aplica el porcentaje de descuento del cliente (10% socio, 15% distribuidor, 20% exportador) de forma manual.
+- No multiplica precio por cantidad ni deduce subtotales.
+- No suma los renglones para obtener el total general.
+- No descuenta ni consulta el saldo de stock en memoria para decidir si habilita la venta; es el backend quien rechaza o aprueba atómicamente la transacción.
+
+---
+
+### 4. Transferencias de Stock
+
+#### a) Objetivo
+Administrar las solicitudes de reposición de botellas de vino desde el depósito central hacia las diferentes salas de venta, coordinando el ciclo de confección, cierre y procesamiento del movimiento.
+
+#### b) Datos que muestra y datos que envía
+- **Datos que envía:**
+  - *Alta de transferencia:* `id_sala` (number, sala solicitante).
+  - *Agregar ítem:* `cod_vino` (number) y `cantidad` (number).
+  - *Cambios de estado:* `nro_transferencia` en la URL para terminar y procesar.
+- **Datos que muestra:**
+  - Formulario de solicitud: selector de Sala Solicitante, fecha de confección (automática/del sistema) e inputs para agregar vinos y cantidades.
+  - Tabla de transferencias existentes con sus estados:
+    - Columnas: Nro de transferencia (`nro`), Fecha (`fecha_confeccion`), Sala solicitante (`sala`), Vinos y cantidades agregadas, Estado actual (`estado`: `en_confeccion`, `terminado`, `procesado`), Acciones disponibles según el estado.
+  - Botones de acción dinámicos: *"Modificar"*, *"Borrar"*, *"Terminar Transferencia"* y *"Procesar Transferencia"*.
+
+#### c) Tabla de Endpoints y Mapeo
+| Dato / Acción | Endpoint | Método | Parámetros | Campo en Respuesta | Función en `front/js/api/` | Origen |
+|---|---|---|---|---|---|---|
+| Crear cabecera de transferencia | `/transferencias` | `POST` | **Body:** `{ id_sala }` | Transferencia creada en estado `en_confeccion` con su `nro_transferencia` | `crearTransferencia(data)` en `transferencias.js` | Enunciado / Bocetos |
+| Agregar renglón de vino a la transferencia | `/transferencias/{nro}/renglones` | `POST` | **Ruta:** `nro`<br>**Body:** `{ cod_vino, cantidad }` | Renglón creado y anexado | `agregarRenglonTransferencia(nro, data)` en `transferencias.js` | Enunciado / Bocetos |
+| Cambiar estado a terminado | `/transferencias/{nro}/terminar` | `POST` | **Ruta:** `nro` | Transferencia actualizada en estado `terminado` | `terminarTransferencia(nro)` en `transferencias.js` | Enunciado / Bocetos |
+| Procesar transferencia (impacta stock) | `/transferencias/{nro}/procesar` | `POST` | **Ruta:** `nro` | Confirmación y transferencia en estado `procesado` | `procesarTransferencia(nro)` en `transferencias.js` | Enunciado / Bocetos |
+| Listado de transferencias para la grilla | `/transferencias` | `GET` | **Query:** `id_sala`, `estado`, `page` | Array de transferencias con sus renglones y estados | `listarTransferencias(filtros)` *(función sugerida)* | **PROPUESTO** (Requerido por Boceto #4) |
+| Selector de salas solicitantes | `/salas` | `GET` | Ninguno | Array de salas de venta | `listarSalas()` *(función sugerida)* | **PROPUESTO** |
+
+#### d) Flujo Paso a Paso
+1. Se carga el listado de transferencias existentes (`GET /transferencias`) y el selector de salas (`GET /salas`).
+2. Para solicitar una nueva transferencia, el usuario selecciona la sala y pulsa *"Crear Solicitud"*, enviando `POST /transferencias`.
+3. Con el `nro_transferencia` obtenido (estado `en_confeccion`), el usuario agrega uno o más vinos indicando la cantidad deseada mediante `POST /transferencias/{nro}/renglones`.
+4. Una vez agregados los ítems, el usuario presiona *"Terminar Transferencia"*, disparando `POST /transferencias/{nro}/terminar`. El estado cambia a `terminado`.
+5. Desde la tabla general, un operador con permisos pulsa *"Procesar Transferencia"*, invocando `POST /transferencias/{nro}/procesar`.
+6. En el backend, el procedimiento almacenado descuenta del depósito central, acredita en la sala solicitante y pasa la transferencia a `procesado`.
+7. Si el depósito no cuenta con stock suficiente de algún vino, la API rechaza el procesamiento con código `409` y el mensaje de stock insuficiente se expone en la interfaz.
+
+#### e) Matriz de Estados y Habilitación de Botones
+| Estado Actual | Botones Habilitados en Frontend | Endpoint Invocado | Estado Resultante | Reglas Aplicadas |
+|---|---|---|---|---|
+| `en_confeccion` | - **Agregar Renglón**<br>- **Quitar Renglón**<br>- **Terminar Transferencia**<br>- **Eliminar Transferencia** | - `POST /transferencias/{nro}/renglones`<br>- `DELETE /transferencias/{nro}/renglones/{cod}`<br>- `POST /transferencias/{nro}/terminar`<br>- `DELETE /transferencias/{nro}` | `terminado` (si se termina) o se mantiene `en_confeccion` | **RN-12**: Solo se permite alterar renglones si está en confección.<br>**RN-11**: Fecha inmutable. |
+| `terminado` | - **Procesar Transferencia** *(Modificar y agregar renglones quedan estrictamente bloqueados)* | - `POST /transferencias/{nro}/procesar` | `procesado` | **RN-11**: Solo se puede procesar si está terminado.<br>**RN-12**: No se admiten cambios en renglones. |
+| `procesado` | *Ninguno* (Documento histórico cerrado e inmutable) | *Sin endpoints de modificación* | Estado final | **RN-10**, **RN-11**: El movimiento ya impactó en las tablas de stock; no puede revertirse ni alterarse. |
+
+#### f) Errores Esperables y Tratamiento
+| Escenario de Error | Regla / Restricción | SQLSTATE | HTTP Status | Tratamiento en Frontend |
+|---|---|---|---|---|
+| Stock insuficiente en depósito central al procesar | **RN-09** (`CHECK stock_deposito >= 0` o procedimiento `sp_procesar_transferencia`) | `P0001` o `23514` | `409 Conflict` | Muestra textualmente el mensaje del backend indicando qué vino no cuenta con existencias en depósito. |
+| Intento de procesar transferencia no terminada | **RN-11** (Procedimiento valida `estado = 'terminado'`) | `P0001` | `409 Conflict` | Muestra el mensaje: *"La transferencia no puede procesarse porque no está en estado terminado."* |
+| Intento de agregar renglones a transferencia terminada o procesada | **RN-12** (Trigger sobre `renglon_transferencia` valida estado en cabecera) | `P0001` | `409 Conflict` | Muestra el mensaje de bloqueo emitido por el trigger. |
+| Modificación indebida de fecha de confección | **RN-11** (Trigger BEFORE UPDATE bloquea cambios en `fecha_confeccion`) | `P0001` | `422 Unprocessable Entity` | Muestra la prohibición de cambio de fecha. |
+
+#### g) Qué NO calcula el Front
+- No calcula existencias ni descuenta botellas del stock del depósito.
+- No incrementa saldos en la sala solicitante.
+- No decide si una transferencia es válida para procesarse sin consultar el estado retornado por el servidor.
+
