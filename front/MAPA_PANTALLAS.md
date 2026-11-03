@@ -310,4 +310,106 @@ La tabla siguiente define el estado de cada catálogo requerido por la interfaz:
 | **Vinos (Activos)** | - Nueva Venta (Renglones)<br>- Transferencias (Renglones) | `GET /vinos` | **EXISTENTE (Enunciado)** | `listarVinos(filtros)` en `vinos.js` | Se utiliza para autocompletar la selección de botellas a vender o transferir. |
 | **Historial de Transferencias** | - Transferencias (Grilla) | `GET /transferencias` | **PROPUESTO / FALTANTE** | `listarTransferencias(filtros)` | El boceto de la pantalla #4 exige listar las transferencias existentes y sus estados (`en_confeccion`, `terminado`, `procesado`). El enunciado solo incluye `POST` para el circuito. |
 
+---
+
+## 📊 Matriz de Resumen: Pantalla vs. Endpoint
+
+La siguiente matriz cruza cada pantalla diseñada con los endpoints correspondientes, indicando el tipo de operación:
+
+| Endpoint | Método | 1. Catálogo de Vinos | 2. Alta / Edición Vino | 3. Nueva Venta | 4. Transferencias | 5. Tablero (Dashboard) | Estado / Origen |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|---|
+| `/salud` | `GET` | Transversal | Transversal | Transversal | Transversal | Transversal | Enunciado / Implementado |
+| `/vinos` | `GET` | **Principal (Grilla)** | - | Lookup (Renglones) | Lookup (Renglones) | - | Enunciado / Implementado |
+| `/vinos/{cod}` | `GET` | **Detalle (Modal)** | Precarga edición | - | - | - | Enunciado / Implementado |
+| `/vinos` | `POST` | - | **Creación** | - | - | - | Enunciado / Implementado |
+| `/vinos/{cod}` | `PUT` | - | **Edición** | - | - | - | Enunciado / Implementado |
+| `/vinos/{cod}` | `DELETE` | - | **Baja (RN-14)** | - | - | - | Enunciado / Implementado |
+| `/cepas` | `GET` | Lookup (Filtro) | Lookup (Corte) | - | - | - | **PROPUESTO / FALTANTE** |
+| `/bodegas` | `GET` | Lookup (Filtro) | Lookup (Bodega) | - | - | - | **PROPUESTO / FALTANTE** |
+| `/maridajes` | `GET` | Lookup (Filtro) | - | - | - | - | **PROPUESTO / FALTANTE** |
+| `/clientes` | `GET` | - | - | **Lookup (Cliente)** | - | - | Enunciado / Implementado |
+| `/salas` | `GET` | - | - | **Lookup (Sala)** | **Lookup (Sala)** | **Lookup (Filtro)** | **PROPUESTO / FALTANTE** |
+| `/comprobantes` | `POST` | - | - | **Emisión de Venta** | - | - | Enunciado / Implementado |
+| `/comprobantes/{nro}` | `GET` | - | - | **Consulta Liquidada** | - | - | Enunciado / Implementado |
+| `/transferencias` | `GET` | - | - | - | **Principal (Grilla)** | - | **PROPUESTO / FALTANTE** |
+| `/transferencias` | `POST` | - | - | - | **Crear Solicitud** | - | Enunciado / Implementado |
+| `/transferencias/{nro}/renglones` | `POST` | - | - | - | **Agregar Ítem** | - | Enunciado / Implementado |
+| `/transferencias/{nro}/terminar` | `POST` | - | - | - | **Cambio a Terminado** | - | Enunciado / Implementado |
+| `/transferencias/{nro}/procesar` | `POST` | - | - | - | **Impactar Stock** | - | Enunciado / Implementado |
+| `/reportes/top-vinos` | `GET` | - | - | - | - | **Widget 1 (Top 10)** | Enunciado / Implementado |
+| `/reportes/ventas-por-sala` | `GET` | - | - | - | - | **Widget 2 (Gráfico)** | Enunciado / Implementado |
+| `/reportes/vinos-sin-stock` | `GET` | - | - | - | - | **Widget 3 (Quiebres)** | Enunciado / Implementado |
+
+---
+
+## ⚠️ Brechas y Pedidos para el Equipo de API
+
+Al contrastar los requerimientos de interfaz plasmados en los bocetos de la issue #12 contra los endpoints mínimos requeridos en el enunciado, se identifican las siguientes brechas que deben coordinarse con el equipo de Backend:
+
+### Brecha 1: Endpoints de catálogos y selectores auxiliares (`/salas`, `/cepas`, `/bodegas`, `/maridajes`)
+- **Qué falta:** Endpoints de tipo `GET` que devuelvan listas clave-valor para poblar combos. Específicamente:
+  - `GET /salas`: id, nombre, código postal.
+  - `GET /cepas`: id, nombre, tipo.
+  - `GET /bodegas`: CUIT, nombre de fantasía / razón social.
+  - `GET /maridajes`: id, nombre, temperatura de servicio recomendada.
+- **Qué pantalla lo necesita:** Catálogo de Vinos, Alta/Edición de Vino, Nueva Venta, Transferencias y Tablero.
+- **Propuesta de solución:** Crear rutas ligeras `GET /salas`, `GET /cepas`, `GET /bodegas` y `GET /maridajes` en la API (o agruparlas bajo `/catalogos/...`), que lean directamente de las tablas correspondientes sin lógica compleja.
+
+### Brecha 2: Listado y consulta de transferencias (`GET /transferencias`)
+- **Qué falta:** Un endpoint para obtener las transferencias solicitadas, sus fechas, salas y estados actuales (`en_confeccion`, `terminado`, `procesado`). El enunciado del TP solo contempla la creación, adición de renglones y cambios de estado por número, pero no la lista previa.
+- **Qué pantalla lo necesita:** Pantalla 4 (Transferencias de Stock).
+- **Propuesta de solución:** Exponer `GET /transferencias?id_sala=&estado=&page=` que devuelva el encabezado de las transferencias junto con sus renglones para alimentar la grilla de seguimiento.
+
+### Brecha 3: Parámetro de sala en reporte de vinos sin stock
+- **Qué falta:** El endpoint mínimo `/reportes/vinos-sin-stock` está definido a nivel general, pero el boceto del Tablero requiere consultar los vinos agotados de una **sala seleccionada** en particular (`/reportes/vinos-sin-stock?sala_id={id}`).
+- **Qué pantalla lo necesita:** Pantalla 5 (Tablero de Control - Widget 3).
+- **Propuesta de solución:** Aceptar el parámetro opcional `sala_id` (o `id_sala`) en la query string de `/reportes/vinos-sin-stock`. Si se omite, devolver el stock en cero consolidado de todas las salas.
+
+### Brecha 4: Parámetros de rango temporal en ventas por sala
+- **Qué falta:** El reporte del Tablero estipula *"Ventas por sala en el último trimestre"*, requiriendo poder filtrar o segmentar por fecha de comprobante.
+- **Qué pantalla lo necesita:** Pantalla 5 (Tablero de Control - Widget 2).
+- **Propuesta de solución:** Permitir los parámetros opcionales `fecha_desde` y `fecha_hasta` (formato ISO `YYYY-MM-DD`) en `GET /reportes/ventas-por-sala`.
+
+### Brecha 5: Estructura de paginación en `/vinos` y listados
+- **Qué falta:** Definir el contrato exacto de paginación entre front y backend para evitar discrepancias.
+- **Propuesta de solución:**
+  - Parámetros de petición: `page` (número base 1) y `pageSize` (límite de ítems).
+  - Estructura de respuesta recomendada:
+    ```json
+    {
+      "items": [ /* lista de elementos */ ],
+      "total": 128,
+      "page": 1,
+      "pageSize": 10,
+      "total_pages": 13
+    }
+    ```
+
+### Brecha 6: Formato unificado de respuestas de error
+- **Qué falta:** Estandarizar la clave donde viaja el mensaje textual de error para que la capa `client.js` lo extraiga limpiamente sin ambigüedad.
+- **Propuesta de solución:**
+  - Utilizar un formato consistente de error con código HTTP coherente (400, 404, 409, 422, 500):
+    ```json
+    {
+      "error": "RN-09",
+      "mensaje": "Stock insuficiente del vino Malbec Reserva en la sala 1! Venta rechazada."
+    }
+    ```
+
+### Brecha 7: Composición de cortes de cepa en `POST /vinos`
+- **Qué falta:** RN-05 exige que la composición de un vino sume exactamente 100% mediante un constraint trigger diferido (`DEFERRABLE INITIALLY DEFERRED`). Si la API exigiera insertar primero el vino y luego cada cepa por llamadas HTTP independientes, el trigger fallaría en la base al hacer commit si no se maneja dentro de la misma transacción.
+- **Qué pantalla lo necesita:** Pantalla 2 (Alta y Edición de Vino).
+- **Propuesta de solución:** Que `POST /vinos` y `PUT /vinos/{cod}` acepten el array `cepas: [{ id_cepa, porcentaje }]` dentro del mismo cuerpo JSON, realizando la inserción del vino y de los registros de `vino_cepa` en una única transacción transaccional atómica en PostgreSQL.
+
+---
+
+## ❓ Supuestos y Dudas a Validar con el Grupo
+
+1. **Atribución de Comprobantes:** Se asume que `POST /comprobantes` recibe tanto la cabecera (`id_cliente`, `id_sala`) como la lista completa de renglones en un único payload, evitando múltiples llamadas para agregar renglones individuales de venta.
+2. **Autenticación y Permisos:** Por el momento no se contempla login ni JWT en este mapeo; se asume que la sala de venta se elige manualmente desde un combo o que el sistema opera en modo mostrador abierto. Si se incorpora autenticación, la sala y el empleado podrían deducirse del token.
+3. **Persistencia de Maridajes:** En el boceto del catálogo, el detalle de vino muestra maridajes y temperatura. Se asume que estos datos provienen de la tabla `vino_maridaje` y `maridaje` vía `GET /vinos/{cod}` y que el alta de maridajes para vinos se gestionará en una etapa complementaria.
+4. **Política CORS:** Se asume que el backend configurará cabeceras CORS para habilitar peticiones originadas en `http://localhost:5500`.
+5. **Precisión Numérica de Moneda:** Se asume que los importes monetarios vienen tipados como números de punto flotante o cadenas numéricas exactas directamente desde el backend (PostgreSQL `NUMERIC(10,2)`), y el front solo agrega el símbolo `$` y el separador de miles.
+
+
 
