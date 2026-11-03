@@ -1,0 +1,22 @@
+# =====================================================================
+# Dockerfile del servicio seed (perfil "seed")
+#
+# Ejecuta el script de carga de db/seed/ contra la base ya migrada.
+# Según la especificación del repositorio, el script de carga usa Python
+# (psycopg, Faker, semilla fija). Completar según el script real que
+# aporten los integrantes de db/seed/.
+# =====================================================================
+
+FROM python:3-slim
+
+# Dependencias del script de carga (psycopg v3 + Faker)
+RUN pip install --no-cache-dir "psycopg[binary]" faker
+
+WORKDIR /seed
+
+# CSV del catalogo y script de carga (aportados por otros integrantes)
+COPY db/seed/ ./
+
+# TODO: reemplazar 'cargar.py' por el nombre real del script de carga de db/seed/
+# y ajustar las variables de entorno que este requiera.
+CMD ["sh", "-c", "if [ -f /seed/cargar.py ]; then python /seed/cargar.py; else echo 'TODO: crear db/seed/cargar.py o actualizar el CMD de db/Dockerfile.seed'; exit 1; fi"]

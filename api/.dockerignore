@@ -1,0 +1,31 @@
+# Variables de entorno (nunca copiar a la imagen)
+.env
+.env.local
+.env.*.local
+
+# Dependencias y caché de Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+.tox/
+.pytest_cache/
+.coverage
+
+# Git y documentación (no son necesarios en la imagen)
+.git
+.gitignore
+README.md
+Dockerfile
+.dockerignore
+
+# Carpetas ajenas a este servicio
+db/
+front/
+consultas/
+docs/
+scripts/
+backups/
+*.md

@@ -1,0 +1,130 @@
+# =====================================================================
+# docker-compose.yml - Bodegas del Atuel
+#
+# Un solo comando: docker compose up --build  (levanta db, api y front)
+# El servicio seed NO corre por defecto (profiles: ["seed"]):
+#   docker compose --profile seed run --rm seed
+#
+# Toda la configuración sensible viene de .env (copiar .env.example a .env).
+# Compose interpola ${...} desde .env; cada servicio recibe solo las
+# variables que necesita en environment: (no se usa env_file).
+# =====================================================================
+
+services:
+  ########################################################################
+  # db - PostgreSQL 16
+  ########################################################################
+  db:
+    build:
+      context: ./db
+      dockerfile: Dockerfile
+    container_name: bodegas-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Falta POSTGRES_PASSWORD en .env}
+      POSTGRES_DB: ${POSTGRES_DB:-bodegas_del_atuel}
+    # Volumen con nombre para persistencia de datos
+    volumes:
+      - bodegas_db_data:/var/lib/postgresql/data
+    # Puerto expuesto solo en localhost (necesario para scripts de backup/restore)
+    ports:
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-bodegas_del_atuel}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - bodegas_net
+
+  ########################################################################
+  # api - API REST (stack por definir: Python/FastAPI | Node/Express | otro)
+  # Se conecta SIEMPRE con el rol app_rw (lectura/escritura),
+  # NUNCA con el propietario ni con un superusuario.
+  ########################################################################
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: bodegas-api
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-bodegas_del_atuel}
+      DB_USER: ${APP_DB_USER:-app_rw}
+      DB_PASSWORD: ${APP_DB_PASSWORD:?Falta APP_DB_PASSWORD en .env}
+      # TODO: agregar variables propias del stack elegido (puerto, workers, etc.)
+    depends_on:
+      db:
+        condition: service_healthy
+    # Puerto expuesto al host
+    ports:
+      - "${API_PORT:-8000}:8000"
+    networks:
+      - bodegas_net
+
+  ########################################################################
+  # front - Frontend (consume SOLO la API)
+  # La URL base de la API es configurable por variable de entorno.
+  # NOTA: si el front es una app compilada (React/Vite), esta variable de
+  # runtime puede no tener efecto salvo que el Dockerfile genere un
+  # config.js al arrancar; de lo contrario debe pasarse como build arg.
+  ########################################################################
+  front:
+    build:
+      context: ./front
+      dockerfile: Dockerfile
+    container_name: bodegas-front
+    environment:
+      # URL base de la API. Desde el navegador (host) apunta a localhost.
+      # Desde la red de Docker usaría http://api:8000.
+      API_BASE_URL: ${API_BASE_URL:-http://localhost:8000}
+      # TODO: agregar variables propias del stack de front
+    depends_on:
+      - api
+    # Puerto expuesto al host
+    ports:
+      - "${FRONT_PORT:-5173}:80"
+    networks:
+      - bodegas_net
+
+  ########################################################################
+  # seed - Carga de datos iniciales (SOLO con el perfil "seed")
+  # Ejecuta el script de carga de db/seed/ contra la base ya migrada.
+  # Se conecta con el PROPIETARIO (POSTGRES_USER/POSTGRES_PASSWORD),
+  # porque la carga masiva necesita ALTER TABLE ... DISABLE TRIGGER,
+  # que exige ser dueño de la base.
+  # No expone puertos al host.
+  ########################################################################
+  seed:
+    build:
+      context: .
+      dockerfile: db/Dockerfile.seed
+    container_name: bodegas-seed
+    profiles:
+      - seed
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-bodegas_del_atuel}
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?Falta POSTGRES_PASSWORD en .env}
+    volumes:
+      - ./db/seed:/seed:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - bodegas_net
+    # TODO: ajustar CMD de db/Dockerfile.seed al nombre real del script de carga.
+
+# Red interna para la comunicación entre servicios
+networks:
+  bodegas_net:
+    driver: bridge
+
+# Volumen con nombre para persistencia de la base de datos
+volumes:
+  bodegas_db_data:
+    name: bodegas_db_data

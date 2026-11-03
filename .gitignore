@@ -1,0 +1,28 @@
+# =====================================================================
+# .gitignore - Bodegas del Atuel
+# =====================================================================
+
+# Variables de entorno (NUNCA subir al repositorio; compose lee de .env)
+.env
+.env.local
+.env.*.local
+
+# Copias de seguridad generadas localmente
+backups/
+
+# Dependencias (según el stack que se elija)
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+.tox/
+.pytest_cache/
+.coverage
+*.log
+
+# Sistema operativo
+.DS_Store
+Thumbs.db

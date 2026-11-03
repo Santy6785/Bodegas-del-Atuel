@@ -1,0 +1,26 @@
+# Variables de entorno (nunca copiar a la imagen)
+.env
+.env.local
+.env.*.local
+
+# Dependencias y artefactos de build
+node_modules/
+dist/
+build/
+*.log
+
+# Git y documentación (no son necesarios en la imagen)
+.git
+.gitignore
+README.md
+Dockerfile
+.dockerignore
+
+# Carpetas ajenas a este servicio
+db/
+api/
+consultas/
+docs/
+scripts/
+backups/
+*.md
