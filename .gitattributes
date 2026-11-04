@@ -1,0 +1,10 @@
+# Auto-detect text files and normalize line endings to LF on commit
+* text=auto
+
+# Shell scripts and SQL files must always use LF line endings for Linux Docker containers
+*.sh text eol=lf
+*.sql text eol=lf
+*.md text eol=lf
+*.py text eol=lf
+*.json text eol=lf
+Dockerfile* text eol=lf

@@ -20,9 +20,9 @@
 
 set -euo pipefail
 
-DB="${POSTGRES_DB:-bodegas_del_atuel}"
-USER="${POSTGRES_USER:-postgres}"
-APP_DB_PASSWORD="${APP_DB_PASSWORD:?Falta la variable de entorno APP_DB_PASSWORD}"
+DB="${POSTGRES_DB:-${DB_NAME:-bodegas_atuel}}"
+USER="${POSTGRES_USER:-owner_bodegas}"
+APP_DB_PASSWORD="${APP_DB_PASSWORD:-${DB_PASSWORD:?Falta la variable de entorno APP_DB_PASSWORD o DB_PASSWORD}}"
 export PGPASSWORD="${POSTGRES_PASSWORD:?Falta la variable de entorno POSTGRES_PASSWORD}"
 
 echo "[init] Aplicando migraciones 001 a 007 en orden numerico sobre la base '$DB'..."
