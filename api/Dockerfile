@@ -5,10 +5,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# Instalar dependencias
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copiar el código fuente
 COPY app/ ./app/
+
+# Usuario no-root (principio de mínimo privilegio de seguridad)
+RUN useradd -m -u 10000 appuser && chown -R appuser:appuser /app
+USER appuser
 
 EXPOSE 8000
 
