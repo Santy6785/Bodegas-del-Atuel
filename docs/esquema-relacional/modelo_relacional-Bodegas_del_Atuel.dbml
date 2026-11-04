@@ -1,6 +1,5 @@
 // =============================================================
 // Bodegas del Atuel - DER base (DBML)
-// Pegar en https://dbdiagram.io para ver el diagrama.
 // Los símbolos de las Ref (>, <, -) son un borrador: revisar la
 // cardinalidad de cada relación antes de dar por cerrado el DER.
 // CHECK, UNIQUE de dominio y triggers NO se modelan aquí: van en 002.
@@ -50,7 +49,7 @@ Enum estado_documento {
 
 // ---------- Localidades y salas ----------
 Table localidad {
-  codigo_postal varchar(8) [pk, note: 'Clave natural. Alfanumérico (ej. M5600)']
+  codigo_postal varchar(8) [pk, note: 'Clave natural. Alfanumérico']
   nombre varchar(100) [not null]
   provincia varchar(60) [not null]
   encargado_regional varchar(120) [not null, note: 'Depende de la localidad']
@@ -121,12 +120,15 @@ Table lote_uva {
 }
 
 Table analisis_calidad {
-  id_analisis int [pk, increment]
-  id_lote int [not null]
+  id_lote int [not null, note: 'Entidad débil: depende de lote_uva']
   fecha date [not null]
+  hora time [not null]
   brix numeric(4,2) [not null]
   ph numeric(3,2) [not null]
   acidez_total numeric(6,2) [not null, note: 'g/L']
+  indexes {
+    (id_lote, fecha, hora) [pk, note: 'Clave conjunta: un análisis por lote, fecha y hora']
+  }
 }
 
 // ---------- Bodegas y vinos ----------
@@ -169,6 +171,7 @@ Table vino_lote {
     (cod_vino, id_lote) [pk]
   }
 }
+
 
 Table maridaje {
   id_maridaje int [pk, increment]
