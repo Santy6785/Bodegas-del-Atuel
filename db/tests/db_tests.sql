@@ -367,3 +367,61 @@ BEGIN;
   -- TODO: Insertar vino con graduacion_alcoholica = 4.0 o 21.0, o superficie <= 0 en parcela.
 ROLLBACK;
 
+
+-- =====================================================================
+-- RESUMEN Y PENDIENTES
+-- =====================================================================
+--
+-- Matriz de Trazabilidad: Regla -> Mecanismo -> Casos de Prueba
+--
+-- | Regla | Mecanismo Implementado                        | Caso OK    | Caso FAIL    | Estado    |
+-- |-------|-----------------------------------------------|------------|--------------|-----------|
+-- | RN-01 | Atributo en vino + CHECK (precio > 0)         | RN-01-OK   | RN-01-FAIL   | PENDIENTE |
+-- | RN-02 | FK + diseño 3FN                               | RN-02-OK   | RN-02-FAIL   | PENDIENTE |
+-- | RN-03 | FK NOT NULL                                   | RN-03-OK   | RN-03-FAIL   | PENDIENTE |
+-- | RN-04 | FK + UNIQUE (parcela, campaña)                | RN-04-OK   | RN-04-FAIL   | PENDIENTE |
+-- | RN-05 | Constraint trigger diferido                   | RN-05-OK   | RN-05-FAIL   | PENDIENTE |
+-- | RN-06 | Función de descuento + CHECK de rango         | RN-06-OK   | RN-06-FAIL   | PENDIENTE |
+-- | RN-07 | Tabla permisos + CHECK entre columnas         | RN-07-OK   | RN-07-FAIL   | PENDIENTE |
+-- | RN-08 | Función de cálculo + trigger                  | RN-08-OK   | RN-08-FAIL   | PENDIENTE |
+-- | RN-09 | Trigger BEFORE INSERT + CHECK (cantidad >= 0) | RN-09-OK   | RN-09-FAIL   | PENDIENTE |
+-- | RN-10 | ENUM + trigger de estados + procedimiento     | RN-10-OK   | RN-10-FAIL   | PENDIENTE |
+-- | RN-11 | Trigger de estados y fecha + procedimiento    | RN-11-OK   | RN-11-FAIL   | PENDIENTE |
+-- | RN-12 | Trigger sobre renglones de documentos         | RN-12-OK   | RN-12-FAIL   | PENDIENTE |
+-- | RN-13 | Trigger AFTER UPDATE + tabla auditoría        | RN-13-OK   | RN-13-FAIL   | PENDIENTE |
+-- | RN-14 | FK con ON DELETE RESTRICT                     | RN-14-OK   | RN-14-FAIL   | PENDIENTE |
+-- | RN-15 | Restricciones CHECK de rangos y valores > 0   | RN-15-OK   | RN-15-FAIL   | PENDIENTE |
+--
+-- ---------------------------------------------------------------------
+-- Dudas y Puntos a Definir con el Rol Datos (Pendientes de Coordinación):
+--
+-- 1. RN-08 (Total de comprobante):
+--    - ¿El trigger debe rechazar explícitamente mediante RAISE EXCEPTION si se
+--      intenta proveer un total manual discrepante (caso FAIL clásico con error)?
+--    - ¿O bien debe sobreescribir silenciosamente el valor manual recalculándolo
+--      en base a los renglones (caso de verificación de recálculo automático)?
+--
+-- 2. RN-13 (Auditoría de cambios de precio):
+--    - Definir cuál es el caso FAIL canónico:
+--      a) Intentar actualizar una columna distinta de precio (ej. nombre_vino)
+--         y verificar que NO se inserte fila en auditoria_precio.
+--      b) Verificar permisos de seguridad (GRANT/REVOKE): intentar eliminar o
+--         modificar filas de auditoria_precio con un usuario de aplicación y
+--         esperar SQLSTATE 42501 (insufficient_privilege).
+--
+-- 3. RN-03 (Empleado en una sola sala):
+--    - Identificar cuál prueba de fallo es la principal para el rol Datos:
+--      violación NOT NULL (SQLSTATE 23502) al omitir la sala, o violación
+--      de foreign key (SQLSTATE 23503) al pasar un ID inexistente.
+--
+-- 4. RN-09 (Stock de sala nunca negativo):
+--    - La defensa opera en dos niveles: un trigger que verifica antes de insertar
+--      el renglón (SQLSTATE P0001) y una restricción CHECK en stock_sala (SQLSTATE 23514).
+--      Conviene que el rol Datos defina si se prueba la excepción del trigger
+--      o la violación de la restricción CHECK en caso de omisión del trigger.
+--
+-- 5. RN-10 y RN-11 (Procesamiento de documentos de ingreso y transferencia):
+--    - Precisar la interfaz de ejecución: ¿el cambio a estado 'procesado' se
+--      invoca mediante un procedimiento almacenado (ej. CALL procesar_ingreso(id))
+--      o mediante un UPDATE directo sobre el estado que dispara un trigger?
+-- =====================================================================
