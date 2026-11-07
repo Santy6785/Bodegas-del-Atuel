@@ -232,14 +232,16 @@ CREATE TABLE cliente_distribuidor (
         REFERENCES cliente (id_cliente)
 );
 
+
+
 CREATE TABLE cliente_exportador (
-    id_cliente   INTEGER     NOT NULL,
-    pais_destino VARCHAR(60) NOT NULL,
+    id_cliente           INTEGER      NOT NULL,
+    pais_destino         VARCHAR(60)  NOT NULL,
+    porcentaje_descuento NUMERIC(5,2) NOT NULL,
     CONSTRAINT pk_cliente_exportador PRIMARY KEY (id_cliente),
     CONSTRAINT fk_cliente_exportador_cliente FOREIGN KEY (id_cliente)
         REFERENCES cliente (id_cliente)
 );
-
 -- Entidad débil de cliente_exportador. Referencia al subtipo, no al supertipo.
 CREATE TABLE permiso_exportacion (
     id_cliente        INTEGER     NOT NULL,

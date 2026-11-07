@@ -3,7 +3,7 @@
 -- Bodegas del Atuel - Funciones de calculo reutilizables
 --
 -- Contiene 4 funciones:
---   fn_descuento_cliente(tipo_cliente)   IMMUTABLE
+--   fn_descuento_cliente(id_cliente)     STABLE
 --   fn_total_comprobante(nro)            STABLE
 --   fn_stock_sala(sala, vino)            STABLE
 --   fn_antiguedad_anios(fecha)           STABLE
@@ -15,7 +15,7 @@
 --     dentro de una misma sentencia, pero puede cambiar entre sentencias.
 --
 -- IMPORTANTE: ninguna de estas funciones se usa dentro de un CHECK.
--- Las que leen tablas o la fecha actual (las tres STABLE) cambian con el
+-- Las que leen tablas o la fecha actual (las cuatro son STABLE) cambian con el
 -- tiempo y romperian la restauracion de un backup. Las reglas que
 -- dependen de ellas van en triggers (005) o procedimientos (004).
 --
@@ -27,30 +27,44 @@ BEGIN;
 -- ---------------------------------------------------------------------
 -- fn_descuento_cliente
 --
--- Proposito : porcentaje de descuento que corresponde a un tipo de
---             cliente (RN-06): socio 10, distribuidor 20, exportador 30.
--- Parametros: p_tipo  tipo_cliente  tipo de cliente.
--- Devuelve  : NUMERIC con el porcentaje (ej. 10.00). NULL si p_tipo es NULL.
--- Volatilidad: IMMUTABLE. Solo depende del argumento: no lee tablas ni la
---              fecha, los porcentajes son constantes de la regla.
+-- Proposito : porcentaje de descuento que corresponde a un cliente (RN-06):
+--               socio         -> 10
+--               distribuidor  -> 20
+--               exportador    -> su propio porcentaje_descuento
+--                                (30 por defecto; U6 lo sube a 35 para los
+--                                exportadores con mas de 3 permisos).
+-- Parametros: p_id_cliente  INTEGER  id del cliente (cliente.id_cliente).
+-- Devuelve  : NUMERIC con el porcentaje (ej. 10.00). NULL si el cliente
+--             no existe o si p_id_cliente es NULL.
+-- Volatilidad: STABLE. Lee cliente y cliente_exportador: el resultado
+--              depende de las tablas, no solo del argumento. Por eso NO es
+--              IMMUTABLE ni puede usarse en un CHECK.
 -- Uso       : el trigger de renglon_comprobante copia este valor a
---             descuento_pct al insertar (snapshot historico).
+--             descuento_pct al insertar (snapshot historico): un cambio
+--             posterior del porcentaje no altera ventas ya emitidas.
+-- Cambio    : antes recibia el tipo de cliente (IMMUTABLE). Se reemplaza
+--             porque el porcentaje del exportador ahora es un dato.
 -- ---------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION fn_descuento_cliente(p_tipo tipo_cliente)
+DROP FUNCTION IF EXISTS fn_descuento_cliente(tipo_cliente);
+
+CREATE OR REPLACE FUNCTION fn_descuento_cliente(p_id_cliente INTEGER)
 RETURNS NUMERIC
 LANGUAGE sql
-IMMUTABLE
+STABLE
 STRICT
 AS $$
-    SELECT CASE p_tipo
-        WHEN 'socio'        THEN 10.00
-        WHEN 'distribuidor' THEN 20.00
-        WHEN 'exportador'   THEN 30.00
-    END;
+    SELECT CASE c.tipo_cliente
+               WHEN 'socio'        THEN 10.00
+               WHEN 'distribuidor' THEN 20.00
+               WHEN 'exportador'   THEN e.porcentaje_descuento
+           END
+      FROM cliente c
+      LEFT JOIN cliente_exportador e ON e.id_cliente = c.id_cliente
+     WHERE c.id_cliente = p_id_cliente;
 $$;
 
-COMMENT ON FUNCTION fn_descuento_cliente(tipo_cliente) IS
-    'RN-06. Porcentaje de descuento por tipo de cliente (10/20/30). IMMUTABLE.';
+COMMENT ON FUNCTION fn_descuento_cliente(INTEGER) IS
+    'RN-06. Descuento del cliente: socio 10, distribuidor 20, exportador su porcentaje_descuento. STABLE.';
 
 -- ---------------------------------------------------------------------
 -- fn_total_comprobante
@@ -149,13 +163,15 @@ COMMIT;
 --     FROM pg_proc
 --    WHERE pronamespace = 'public'::regnamespace AND proname LIKE 'fn\_%'
 --    ORDER BY proname;
---   -- Esperado: fn_antiguedad_anios s, fn_descuento_cliente i,
+--   -- Esperado: fn_antiguedad_anios s, fn_descuento_cliente s,
 --   --           fn_stock_sala s, fn_total_comprobante s
 --
 -- Resultados esperados:
---   SELECT fn_descuento_cliente('socio'),
---          fn_descuento_cliente('distribuidor'),
---          fn_descuento_cliente('exportador');           -- 10.00 | 20.00 | 30.00
+--   SELECT fn_descuento_cliente(-1);                     -- NULL (cliente inexistente)
+--   -- Con datos cargados: 10 para socios, 20 para distribuidores y
+--   -- 30 o 35 para exportadores.
+--   SELECT tipo_cliente, fn_descuento_cliente(id_cliente) AS pct, count(*)
+--     FROM cliente GROUP BY 1, 2 ORDER BY 1, 2;
 --   SELECT fn_antiguedad_anios((CURRENT_DATE - INTERVAL '6 years')::date);   -- 6
 --   SELECT fn_antiguedad_anios((CURRENT_DATE - INTERVAL '5 years 11 months')::date);  -- 5
 --   SELECT fn_antiguedad_anios((CURRENT_DATE + INTERVAL '1 year')::date);    -- 0

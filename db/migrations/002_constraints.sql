@@ -276,9 +276,11 @@ ALTER TABLE cliente_distribuidor
         REFERENCES cliente (id_cliente) ON DELETE CASCADE ON UPDATE RESTRICT;
 
 ALTER TABLE cliente_exportador
-    DROP CONSTRAINT fk_cliente_exportador_cliente,
-    ADD CONSTRAINT fk_cliente_exportador_cliente FOREIGN KEY (id_cliente)
-        REFERENCES cliente (id_cliente) ON DELETE CASCADE ON UPDATE RESTRICT;
+    ALTER COLUMN porcentaje_descuento SET DEFAULT 30.00;
+
+ALTER TABLE cliente_exportador
+    ADD CONSTRAINT ck_cliente_exportador_descuento
+    CHECK (porcentaje_descuento BETWEEN 0 AND 100);
 
 -- Entidad debil de cliente_exportador.
 ALTER TABLE permiso_exportacion
