@@ -25,15 +25,78 @@ Este documento describe la configuración, ejecución y verificación del servic
    ```bash
    docker compose up -d
    ```
-   El contenedor `bodegas-db` se descargará e inicializará en segundo plano.
+   El contenedor `bodegas-db` se descargará e inicializará en segundo plano con una base de datos vacía lista para recibir las migraciones.
 
-3. **Verificar la base de datos automáticamente:**
+3. **Aplicar las migraciones:**
+   ```bash
+   ./scripts/migrate.sh
+   # O en Windows mediante Git Bash:
+   bash scripts/migrate.sh
+   ```
+   Aplica en orden estricto (alfabético/numérico) todos los scripts de `db/migrations/`, deteniéndose de inmediato ante cualquier error (`ON_ERROR_STOP=1`) y garantizando atomicidad por archivo (`--single-transaction`).
+
+4. **Verificar la base de datos:**
    ```bash
    ./scripts/verify_db.sh
    # O en Windows mediante Git Bash:
    bash scripts/verify_db.sh
    ```
-   El script esperará a que el contenedor alcance el estado `healthy`, revisará que los logs no contengan líneas de `ERROR`, y listará las tablas, tipos y restricciones creadas.
+   El script revisará que el contenedor reporte estado `healthy`, revisará que los logs no contengan líneas de `ERROR`, y listará las tablas, tipos y restricciones creadas.
+
+---
+
+## ⚙️ Aplicar Migraciones (`scripts/migrate.sh`)
+
+El script `scripts/migrate.sh` es la herramienta centralizada y determinística para aplicar cambios estructurales en la base de datos de manera uniforme tanto en local como en entornos remotos.
+
+### Modos de Conexión
+
+#### 1. Modo Docker (Local por defecto)
+Al ejecutarse sin argumentos o sin la variable `DATABASE_URL`, el script interactúa directamente con el contenedor PostgreSQL definido en `docker-compose.yml`:
+```bash
+./scripts/migrate.sh
+```
+Lee automáticamente las variables `POSTGRES_USER` y `POSTGRES_DB` desde `.env` y canaliza cada archivo SQL por stdin al comando `psql` dentro del contenedor.
+
+#### 2. Modo Directo (Nube o Servidor Remoto)
+Pensado para bases de datos administradas en la nube (AWS RDS, Neon, Supabase, Railway, Render, etc.):
+```bash
+# Vía parámetro --url:
+./scripts/migrate.sh --url "postgresql://<DB_USER>:<DB_PASSWORD>@<DB_HOST>:<DB_PORT>/<DB_NAME>?sslmode=require"
+
+# O mediante variable de entorno:
+export DATABASE_URL="postgresql://<DB_USER>:<DB_PASSWORD>@<DB_HOST>:<DB_PORT>/<DB_NAME>?sslmode=require"
+./scripts/migrate.sh
+```
+* **Enmascaramiento de seguridad:** La consola **nunca** imprime contraseñas ni la URL completa; en la salida sólo se visualizan el host y el nombre de la base de datos (`Host: <DB_HOST>:<DB_PORT> | Base: <DB_NAME>`).
+
+### Opciones Disponibles
+- `--dir <carpeta>`: Permite indicar un directorio alternativo de migraciones (por defecto `db/migrations`, muy útil para suites de pruebas o migraciones parciales).
+- `--url <cadena>`: Define la cadena de conexión para el modo directo.
+- `-h, --help`: Muestra la ayuda y opciones disponibles.
+
+### Comportamiento ante Fallos y Lectura de Errores
+- Cada migración se ejecuta con `-v ON_ERROR_STOP=1` y `--single-transaction` (`-1`).
+- Si un archivo contiene un fallo de sintaxis, referencia inválida o violación de restricción:
+  1. PostgreSQL aborta inmediatamente la transacción de ese archivo, evitando cambios a medias o esquemas corruptos.
+  2. `migrate.sh` muestra en pantalla el error exacto arrojado por PostgreSQL.
+  3. La ejecución se detiene de forma tajante: **ninguna migración posterior es procesada**.
+  4. El script finaliza con código de salida distinto de cero (`exit 1`).
+
+### Limitación de Idempotencia y Reinicio
+> [!WARNING]
+> **El script no es idempotente.** Correrlo dos veces sobre la misma base fallará en `001_esquema.sql` porque los objetos (tablas, secuencias, tipos) ya existen.
+>
+> Para reiniciar la base de datos local desde cero:
+> ```bash
+> docker compose down -v
+> docker compose up -d
+> ./scripts/migrate.sh
+> ./scripts/verify_db.sh
+> ```
+
+### 💡 Mejora Futura Identificada
+Actualmente no se mantiene una tabla de control tipo `schema_migrations` ni cálculo de checksums. Se deja asentado como mejora técnica para etapas futuras incorporar seguimiento histórico de migraciones para permitir ejecuciones idempotentes e incrementales.
 
 ---
 
@@ -43,16 +106,12 @@ Para restablecer la base de datos a un estado limpio:
 ```bash
 docker compose down -v
 docker compose up -d
+./scripts/migrate.sh
+./scripts/verify_db.sh
 ```
 
 ### ¿Por qué hace falta `down -v`?
-La imagen oficial de PostgreSQL ejecuta los scripts situados en `/docker-entrypoint-initdb.d` en orden alfabético (`001_esquema.sql`, `002_constraints.sql`, etc.) **únicamente cuando el directorio de datos (`/var/lib/postgresql/data`) está completamente vacío**.
-
-Si el volumen de datos nombrado (`pgdata`) ya existe y contiene datos, PostgreSQL muestra en los logs:
-```text
-PostgreSQL Database directory appears to contain a database; Skipping initialization
-```
-y **no vuelve a ejecutar las migraciones**. Por lo tanto, cualquier cambio o prueba que requiera recrear el esquema desde cero debe destruir el volumen previo mediante `docker compose down -v`.
+PostgreSQL persiste sus datos en el volumen nombrado `pgdata`. Para realizar pruebas limpias o volver a aplicar la totalidad de las migraciones sin conflictos de objetos existentes, es necesario destruir dicho volumen mediante `docker compose down -v` y levantar nuevamente el servicio antes de ejecutar `./scripts/migrate.sh`.
 
 ---
 
