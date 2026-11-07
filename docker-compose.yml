@@ -1,125 +1,95 @@
 # =====================================================================
 # docker-compose.yml - Bodegas del Atuel
 #
-# Un solo comando: docker compose up --build  (levanta db, api y front)
-# El servicio seed NO corre por defecto (profiles: ["seed"]):
-#   docker compose --profile seed run --rm seed
+# Infraestructura base: Servicio de Base de Datos PostgreSQL.
 #
-# Toda la configuración sensible viene de .env (copiar .env.example a .env).
-# Compose interpola ${...} desde .env; cada servicio recibe solo las
-# variables que necesita en environment: (no se usa env_file).
+# Configuración sensible:
+#   Toda variable sensible o de entorno debe definirse en un archivo .env
+#   (copiar .env.example a .env antes de iniciar).
 # =====================================================================
 
 services:
   ########################################################################
   # db - PostgreSQL 16
+  # Base de datos relacional para el sistema Bodegas del Atuel.
+  #
+  # Inicialización de migraciones:
+  #   Las migraciones se ejecutan de forma explícita y controlada mediante
+  #   el script ./scripts/migrate.sh con soporte transaccional y ON_ERROR_STOP.
+  #   Para evitar ejecuciones automáticas no controladas y garantizar consistencia
+  #   entre entornos (local y nube), NO se montan en /docker-entrypoint-initdb.d.
   ########################################################################
   db:
-    build:
-      context: ./db
-      dockerfile: Dockerfile
+    image: postgres:16
     container_name: bodegas-db
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-owner_bodegas}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Falta POSTGRES_PASSWORD en .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?define POSTGRES_PASSWORD en .env}
       POSTGRES_DB: ${POSTGRES_DB:-bodegas_atuel}
-      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-${DB_PASSWORD:?Falta APP_DB_PASSWORD o DB_PASSWORD en .env}}
-    # Volumen con nombre para persistencia de datos
-    volumes:
-      - bodegas_db_data:/var/lib/postgresql/data
-    # Puerto expuesto solo en localhost (necesario para scripts de backup/restore)
     ports:
-      - "127.0.0.1:${DB_PORT:-5432}:5432"
+      # Puerto expuesto en el host; configurable por si el 5432 está ocupado
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      # Volumen con nombre para persistir los datos de la base
+      - pgdata:/var/lib/postgresql/data
+      # Las migraciones se gestionan exclusivamente con ./scripts/migrate.sh
+      # - ./db/migrations:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-owner_bodegas} -d ${POSTGRES_DB:-bodegas_atuel}"]
-      interval: 10s
+      interval: 5s
       timeout: 5s
       retries: 5
-      start_period: 30s
+      start_period: 10s
     networks:
       - bodegas_net
 
   ########################################################################
-  # api - API REST (FastAPI / Python)
-  # Se conecta SIEMPRE con el rol app_rw (lectura/escritura),
-  # NUNCA con el propietario ni con un superusuario.
+  # api - API REST (Preparado para incorporar en etapas posteriores)
   ########################################################################
-  api:
-    build:
-      context: ./api
-      dockerfile: Dockerfile
-    container_name: bodegas-api
-    environment:
-      DB_HOST: db
-      DB_PORT: 5432
-      DB_NAME: ${POSTGRES_DB:-${DB_NAME:-bodegas_atuel}}
-      DB_USER: ${DB_USER:-${APP_DB_USER:-app_rw}}
-      DB_PASSWORD: ${DB_PASSWORD:-${APP_DB_PASSWORD:?Falta DB_PASSWORD en .env}}
-      API_PORT: ${API_PORT:-8000}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:3000}
-    depends_on:
-      db:
-        condition: service_healthy
-    # Puerto expuesto al host
-    ports:
-      - "${API_PORT:-8000}:8000"
-    networks:
-      - bodegas_net
+  # api:
+  #   build:
+  #     context: ./api
+  #     dockerfile: Dockerfile
+  #   container_name: bodegas-api
+  #   restart: unless-stopped
+  #   environment:
+  #     DB_HOST: db
+  #     DB_PORT: 5432
+  #     DB_NAME: ${POSTGRES_DB:-bodegas_atuel}
+  #     DB_USER: ${DB_USER:-app_rw}
+  #     DB_PASSWORD: ${DB_PASSWORD:?define DB_PASSWORD en .env}
+  #     API_PORT: ${API_PORT:-8000}
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
+  #   ports:
+  #     - "${API_PORT:-8000}:8000"
+  #   networks:
+  #     - bodegas_net
 
   ########################################################################
-  # front - Frontend (HTML5, CSS3, JS Vanilla ES Modules con Nginx)
-  # Consume únicamente la API REST.
+  # front - Frontend Cliente (Preparado para incorporar en etapas posteriores)
   ########################################################################
-  front:
-    build:
-      context: ./front
-      dockerfile: Dockerfile
-    container_name: bodegas-front
-    environment:
-      API_BASE_URL: ${API_BASE_URL:-http://localhost:8000}
-    depends_on:
-      - api
-    # Puerto expuesto al host
-    ports:
-      - "${FRONT_PORT:-5173}:80"
-    networks:
-      - bodegas_net
+  # front:
+  #   build:
+  #     context: ./front
+  #     dockerfile: Dockerfile
+  #   container_name: bodegas-front
+  #   restart: unless-stopped
+  #   depends_on:
+  #     - api
+  #   ports:
+  #     - "${FRONT_PORT:-5173}:80"
+  #   networks:
+  #     - bodegas_net
 
-  ########################################################################
-  # seed - Carga de datos iniciales (SOLO con el perfil "seed")
-  # Ejecuta el script de carga de db/seed/ contra la base ya migrada.
-  # Se conecta con el PROPIETARIO (POSTGRES_USER/POSTGRES_PASSWORD),
-  # porque la carga masiva necesita ALTER TABLE ... DISABLE TRIGGER,
-  # que exige ser dueño de la base.
-  # No expone puertos al host.
-  ########################################################################
-  seed:
-    build:
-      context: .
-      dockerfile: db/Dockerfile.seed
-    container_name: bodegas-seed
-    profiles:
-      - seed
-    environment:
-      DB_HOST: db
-      DB_PORT: 5432
-      DB_NAME: ${POSTGRES_DB:-${DB_NAME:-bodegas_atuel}}
-      DB_USER: ${POSTGRES_USER:-owner_bodegas}
-      DB_PASSWORD: ${POSTGRES_PASSWORD:?Falta POSTGRES_PASSWORD en .env}
-    volumes:
-      - ./db/seed:/seed:ro
-    depends_on:
-      db:
-        condition: service_healthy
-    networks:
-      - bodegas_net
-
-# Red interna para la comunicación entre servicios
+# Red interna para comunicación aislada entre servicios
 networks:
   bodegas_net:
     driver: bridge
 
-# Volumen con nombre para persistencia de la base de datos
+# Volumen nombrado para persistencia de datos del motor PostgreSQL
 volumes:
-  bodegas_db_data:
-    name: bodegas_db_data
+  pgdata:
+    name: pgdata
