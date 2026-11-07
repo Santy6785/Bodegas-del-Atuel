@@ -213,3 +213,157 @@ BEGIN;
   -- TODO: Intentar UPDATE o INSERT directo de monto total arbitrario en comprobante para comprobar rechazo.
 ROLLBACK;
 
+
+-- =====================================================================
+-- REGLA RN-09: No vender más que el stock de la sala; stock nunca negativo
+-- Mecanismo: Trigger BEFORE INSERT + CHECK (cantidad >= 0 / stock >= 0)
+-- Archivo de migración: db/migrations/002_constraints.sql / db/migrations/005_triggers.sql
+-- =====================================================================
+
+-- CASO: RN-09-OK
+-- TIPO: DEBE FUNCIONAR
+-- ESPERADO: Venta de renglón con cantidad menor o igual al stock disponible en la sala; descuenta stock correctamente.
+BEGIN;
+  -- TODO: Insertar renglón de comprobante con cantidad <= stock_disponible de la sala.
+ROLLBACK;
+
+-- CASO: RN-09-FAIL
+-- TIPO: DEBE FALLAR
+-- ESPERADO: Falla al intentar vender un renglón con cantidad mayor al stock disponible de la sala.
+-- SQLSTATE esperado: P0001 (raise_exception en trigger) o 23514 (check_violation en stock)
+BEGIN;
+  -- TODO: Insertar renglón solicitando cantidad superior al stock existente para forzar rechazo.
+ROLLBACK;
+
+
+-- =====================================================================
+-- REGLA RN-10: Ingreso: en_confeccion -> terminado -> procesado, sin retrocesos; solo terminado impacta el depósito
+-- Mecanismo: ENUM (estado_documento) + trigger de transiciones de estado + procedimiento
+-- Archivo de migración: db/migrations/004_procedimientos.sql / db/migrations/005_triggers.sql
+-- =====================================================================
+
+-- CASO: RN-10-OK
+-- TIPO: DEBE FUNCIONAR
+-- ESPERADO: Flujo secuencial correcto de ingreso (en_confeccion -> terminado -> procesado) con acreditación de stock al procesar.
+BEGIN;
+  -- TODO: Registrar ingreso en confección, avanzar a terminado y luego procesar actualizando stock.
+ROLLBACK;
+
+-- CASO: RN-10-FAIL
+-- TIPO: DEBE FALLAR
+-- ESPERADO: Falla al intentar retroceder un estado (ej. terminado -> en_confeccion) o procesar un ingreso no terminado.
+-- SQLSTATE esperado: P0001 (raise_exception)
+BEGIN;
+  -- TODO: Intentar transicionar de 'procesado' a 'en_confeccion' o forzar retroceso inválido de estado.
+ROLLBACK;
+
+
+-- =====================================================================
+-- REGLA RN-11: Idem RN-10 para transferencias; fecha de confección = actual e inmodificable; no procesa sin stock
+-- Mecanismo: Trigger de transiciones de estado y de fecha + procedimiento de procesamiento
+-- Archivo de migración: db/migrations/004_procedimientos.sql / db/migrations/005_triggers.sql
+-- =====================================================================
+
+-- CASO: RN-11-OK
+-- TIPO: DEBE FUNCIONAR
+-- ESPERADO: Transferencia creada con fecha actual, avance secuencial de estado y procesamiento exitoso habiendo stock en origen.
+BEGIN;
+  -- TODO: Crear transferencia, cambiar a terminada y procesar verificando egreso en origen e ingreso en destino.
+ROLLBACK;
+
+-- CASO: RN-11-FAIL
+-- TIPO: DEBE FALLAR
+-- ESPERADO: Falla al intentar modificar la fecha de confección, retroceder de estado o procesar sin stock suficiente en sala origen (debe revertir todo).
+-- SQLSTATE esperado: P0001 (raise_exception)
+BEGIN;
+  -- TODO: Ejecutar UPDATE alterando la fecha_confeccion o intentar procesar sin stock suficiente en origen.
+ROLLBACK;
+
+
+-- =====================================================================
+-- REGLA RN-12: Documento que no está en confección no admite agregar/modificar/quitar renglones
+-- Mecanismo: Trigger BEFORE INSERT/UPDATE/DELETE sobre los renglones
+-- Archivo de migración: db/migrations/005_triggers.sql
+-- =====================================================================
+
+-- CASO: RN-12-OK
+-- TIPO: DEBE FUNCIONAR
+-- ESPERADO: Inserción, modificación o eliminación exitosa de renglones mientras el documento permanezca en 'en_confeccion'.
+BEGIN;
+  -- TODO: Insertar o actualizar renglones en un ingreso/transferencia/comprobante en confección.
+ROLLBACK;
+
+-- CASO: RN-12-FAIL
+-- TIPO: DEBE FALLAR
+-- ESPERADO: Falla al intentar insertar, modificar o borrar renglones en un documento terminado o procesado.
+-- SQLSTATE esperado: P0001 (raise_exception)
+BEGIN;
+  -- TODO: Intentar INSERT de un renglón en un documento con estado 'terminado' o 'procesado'.
+ROLLBACK;
+
+
+-- =====================================================================
+-- REGLA RN-13: Todo cambio de precio queda auditado (fecha, usuario, precio anterior y nuevo)
+-- Mecanismo: Trigger AFTER UPDATE en vino + inserción en tabla auditoria_precio
+-- Archivo de migración: db/migrations/005_triggers.sql
+-- =====================================================================
+
+-- CASO: RN-13-OK
+-- TIPO: DEBE FUNCIONAR
+-- ESPERADO: Una modificación de precio mediante UPDATE genera automáticamente una nueva fila en auditoria_precio con los valores exactos.
+BEGIN;
+  -- TODO: Actualizar precio de un vino y consultar que exista una fila correspondiente en auditoria_precio.
+ROLLBACK;
+
+-- CASO: RN-13-FAIL
+-- TIPO: DEBE FALLAR
+-- ESPERADO: Verificación o rechazo (a definir con Datos: UPDATE de otra columna NO genera fila en auditoría, o el rol de aplicación tiene denegado el DELETE/UPDATE sobre auditoria_precio).
+-- SQLSTATE esperado: 42501 (insufficient_privilege) o verificación de no generación de fila
+BEGIN;
+  -- TODO: Intentar DELETE en la tabla auditoria_precio o probar que actualizar otra columna no genera fila de auditoría.
+ROLLBACK;
+
+
+-- =====================================================================
+-- REGLA RN-14: No borrar transportista, bodega ni vino con movimientos
+-- Mecanismo: Claves foráneas con acción referencial ON DELETE RESTRICT (o NO ACTION por defecto)
+-- Archivo de migración: db/migrations/002_constraints.sql
+-- =====================================================================
+
+-- CASO: RN-14-OK
+-- TIPO: DEBE FUNCIONAR
+-- ESPERADO: Eliminación exitosa de un vino, bodega o transportista que no posee movimientos ni registros hijos asociados.
+BEGIN;
+  -- TODO: Insertar un vino nuevo sin movimientos y borrarlo confirmando eliminación limpia.
+ROLLBACK;
+
+-- CASO: RN-14-FAIL
+-- TIPO: DEBE FALLAR
+-- ESPERADO: Falla al intentar borrar un vino, bodega o transportista que tiene movimientos o relaciones activas.
+-- SQLSTATE esperado: 23503 (foreign_key_violation)
+BEGIN;
+  -- TODO: Intentar DELETE de un vino que posea renglones de comprobante o stock asociado.
+ROLLBACK;
+
+
+-- =====================================================================
+-- REGLA RN-15: Cantidades, superficies, kilos y precios > 0; graduación entre 5 y 20
+-- Mecanismo: Restricciones CHECK en tablas respectivas
+-- Archivo de migración: db/migrations/002_constraints.sql
+-- =====================================================================
+
+-- CASO: RN-15-OK
+-- TIPO: DEBE FUNCIONAR
+-- ESPERADO: Inserción exitosa de registros con cantidades, superficies, kilos y precios positivos, y graduación alcohólica entre 5.0 y 20.0.
+BEGIN;
+  -- TODO: Insertar vino con graduación 14.5 y precios/cantidades > 0 en las tablas respectivas.
+ROLLBACK;
+
+-- CASO: RN-15-FAIL
+-- TIPO: DEBE FALLAR
+-- ESPERADO: Falla al intentar registrar graduación fuera de rango (ej. 4 o 21) o valores de cantidad/superficie/kilos <= 0.
+-- SQLSTATE esperado: 23514 (check_violation)
+BEGIN;
+  -- TODO: Insertar vino con graduacion_alcoholica = 4.0 o 21.0, o superficie <= 0 en parcela.
+ROLLBACK;
+
