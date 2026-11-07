@@ -124,7 +124,7 @@ Cada entidad o relación del DER se convierte en tabla según [MR]: entidad fuer
 | MARIDAJE | `maridaje` | **D2**: clave subrogada con `UNIQUE(nombre)`. |
 | CLIENTE | `cliente` | Se agrega `tipo_cliente` como discriminador de la especialización. No está en el DER. |
 | SOCIO | (sin tabla) | Sin atributos propios. Se identifica con `tipo_cliente = 'socio'`. |
-| DISTRIBUIDOR, EXPORTADOR | `cliente_distribuidor`, `cliente_exportador` | Subtipos 1:1 con `cliente`. |
+| DISTRIBUIDOR, EXPORTADOR | `cliente_distribuidor`, `cliente_exportador` | Subtipos 1:1 con `cliente`. `cliente_exportador` incluye `porcentaje_descuento` (U6). |
 | PERMISO_EXPORTACION (débil) | `permiso_exportacion` | FK al subtipo `cliente_exportador`, no al supertipo. |
 | COMPROBANTE | `comprobante` | Se agregan `subtotal`, `descuento` y `total` como importes almacenados. |
 | `incluye` (comprobante–vino) | `renglon_comprobante` | Atributos `cantidad`, `precio_unitario`, `descuento_pct`, `subtotal`. |
@@ -219,7 +219,7 @@ Lista para armar los archivos de la etapa 2. Cada una se asocia a una regla del 
 
 | Objeto | Tipo | Archivo |
 |---|---|---|
-| `fn_descuento_cliente(tipo_cliente)` | STABLE | `003_funciones.sql` |
+| `fn_descuento_cliente(id_cliente)` | STABLE | `003_funciones.sql` |
 | `fn_total_comprobante(nro)` | STABLE | `003_funciones.sql` |
 | `fn_stock_sala(id_sala, cod_vino)` | STABLE | `003_funciones.sql` |
 | `fn_antiguedad_anios(fecha)` | STABLE | `003_funciones.sql` |
