@@ -14,12 +14,10 @@ services:
   # Base de datos relacional para el sistema Bodegas del Atuel.
   #
   # Inicialización de migraciones:
-  #   El directorio ./db/migrations se monta como solo lectura (:ro) en
-  #   /docker-entrypoint-initdb.d. La imagen oficial de PostgreSQL ejecuta
-  #   automáticamente los scripts .sql en orden alfabético estricto (001_,
-  #   002_, etc.) ÚNICAMENTE cuando el volumen de datos está vacío (en la
-  #   primera creación del contenedor). Si el volumen ya contiene datos,
-  #   el entrypoint omite la ejecución para proteger la base existente.
+  #   Las migraciones se ejecutan de forma explícita y controlada mediante
+  #   el script ./scripts/migrate.sh con soporte transaccional y ON_ERROR_STOP.
+  #   Para evitar ejecuciones automáticas no controladas y garantizar consistencia
+  #   entre entornos (local y nube), NO se montan en /docker-entrypoint-initdb.d.
   ########################################################################
   db:
     image: postgres:16
@@ -35,8 +33,8 @@ services:
     volumes:
       # Volumen con nombre para persistir los datos de la base
       - pgdata:/var/lib/postgresql/data
-      # Montaje de solo lectura de las migraciones para inicialización automática
-      - ./db/migrations:/docker-entrypoint-initdb.d:ro
+      # Las migraciones se gestionan exclusivamente con ./scripts/migrate.sh
+      # - ./db/migrations:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-owner_bodegas} -d ${POSTGRES_DB:-bodegas_atuel}"]
       interval: 5s
