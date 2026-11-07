@@ -38,3 +38,178 @@
 --      confirme que el fallo se debe a la restricción testeada y no a un error no previsto.
 -- =====================================================================
 
+-- =====================================================================
+-- REGLA RN-01: Precio de vino único y > 0
+-- Mecanismo: Atributo en vino + CHECK (precio > 0)
+-- Archivo de migración: db/migrations/002_constraints.sql
+-- =====================================================================
+
+-- CASO: RN-01-OK
+-- TIPO: DEBE FUNCIONAR
+-- ESPERADO: Inserción exitosa de un registro de vino con precio estrictamente positivo (> 0).
+BEGIN;
+  -- TODO: Insertar un vino con precio válido (> 0) y confirmar persistencia temporal.
+ROLLBACK;
+
+-- CASO: RN-01-FAIL
+-- TIPO: DEBE FALLAR
+-- ESPERADO: Falla al intentar insertar un vino con precio igual a 0 o negativo.
+-- SQLSTATE esperado: 23514 (check_violation)
+BEGIN;
+  -- TODO: Insertar un vino con precio 0 o menor que 0 para disparar la restricción CHECK.
+ROLLBACK;
+
+
+-- =====================================================================
+-- REGLA RN-02: Sala en una sola localidad; localidad con único encargado
+-- Mecanismo: FK + diseño en Tercera Forma Normal (3FN)
+-- Archivo de migración: db/migrations/002_constraints.sql
+-- =====================================================================
+
+-- CASO: RN-02-OK
+-- TIPO: DEBE FUNCIONAR
+-- ESPERADO: Inserción exitosa de una sala de venta vinculada a una localidad existente y válida.
+BEGIN;
+  -- TODO: Insertar una sala de venta asignándole el ID de una localidad existente.
+ROLLBACK;
+
+-- CASO: RN-02-FAIL
+-- TIPO: DEBE FALLAR
+-- ESPERADO: Falla por clave foránea al intentar registrar una sala en una localidad inexistente.
+-- SQLSTATE esperado: 23503 (foreign_key_violation)
+BEGIN;
+  -- TODO: Insertar una sala de venta con localidad_id inexistente (ej. -9999).
+ROLLBACK;
+
+
+-- =====================================================================
+-- REGLA RN-03: Empleado trabaja en una sola sala
+-- Mecanismo: Clave foránea con restricción NOT NULL (FK NOT NULL)
+-- Archivo de migración: db/migrations/001_esquema.sql / db/migrations/002_constraints.sql
+-- =====================================================================
+
+-- CASO: RN-03-OK
+-- TIPO: DEBE FUNCIONAR
+-- ESPERADO: Inserción o actualización exitosa de un empleado asignado a una sala válida.
+BEGIN;
+  -- TODO: Registrar un empleado asociándolo correctamente a una sala existente.
+ROLLBACK;
+
+-- CASO: RN-03-FAIL
+-- TIPO: DEBE FALLAR
+-- ESPERADO: Falla al intentar crear un empleado sin sala (NULL) o con sala inexistente.
+-- SQLSTATE esperado: 23502 (not_null_violation) o 23503 (foreign_key_violation)
+BEGIN;
+  -- TODO: Insertar empleado con id_sala NULL o ID de sala inexistente.
+ROLLBACK;
+
+
+-- =====================================================================
+-- REGLA RN-04: Parcela con una sola cepa; una cosecha por parcela y campaña
+-- Mecanismo: FK a cepa + restricción de unicidad UNIQUE (id_parcela, anio_campana)
+-- Archivo de migración: db/migrations/002_constraints.sql
+-- =====================================================================
+
+-- CASO: RN-04-OK
+-- TIPO: DEBE FUNCIONAR
+-- ESPERADO: Inserción exitosa de un lote de uva para una parcela y campaña sin cosecha previa.
+BEGIN;
+  -- TODO: Insertar un lote de uva para una combinación nueva de (parcela, campaña).
+ROLLBACK;
+
+-- CASO: RN-04-FAIL
+-- TIPO: DEBE FALLAR
+-- ESPERADO: Falla al intentar insertar un segundo lote de uva para la misma parcela y campaña.
+-- SQLSTATE esperado: 23505 (unique_violation)
+BEGIN;
+  -- TODO: Insertar dos lotes de uva sucesivos con idéntica parcela y misma campaña.
+ROLLBACK;
+
+
+-- =====================================================================
+-- REGLA RN-05: Porcentajes de corte suman 100
+-- Mecanismo: Constraint trigger diferido (DEFERRABLE INITIALLY DEFERRED)
+-- Archivo de migración: db/migrations/005_triggers.sql
+-- =====================================================================
+
+-- CASO: RN-05-OK
+-- TIPO: DEBE FUNCIONAR
+-- ESPERADO: Inserción de corte de cepas cuya suma de porcentajes alcanza exactamente 100 al COMMIT.
+BEGIN;
+  -- TODO: Insertar registros en vino_cepa sumando exactamente 100% y validar que el COMMIT prospere.
+ROLLBACK;
+
+-- CASO: RN-05-FAIL
+-- TIPO: DEBE FALLAR
+-- ESPERADO: Falla al hacer COMMIT si la suma de porcentajes de corte es distinta de 100 (el error aparece al COMMIT, no al INSERT).
+-- SQLSTATE esperado: P0001 (raise_exception)
+BEGIN;
+  -- TODO: Insertar registros en vino_cepa que sumen distinto de 100% (ej. 80%) y ejecutar COMMIT para disparar error.
+ROLLBACK;
+
+
+-- =====================================================================
+-- REGLA RN-06: Descuento por tipo de cliente: socio 10, distribuidor 20, exportador 30
+-- Mecanismo: Función de descuento + CHECK de rango
+-- Archivo de migración: db/migrations/002_constraints.sql / db/migrations/003_funciones.sql
+-- =====================================================================
+
+-- CASO: RN-06-OK
+-- TIPO: DEBE FUNCIONAR
+-- ESPERADO: Aplicación o cálculo exitoso de descuento según el tipo de cliente (socio: 10, distribuidor: 20, exportador: 30).
+BEGIN;
+  -- TODO: Validar función/cálculo de descuento según tipo de cliente con valores permitidos.
+ROLLBACK;
+
+-- CASO: RN-06-FAIL
+-- TIPO: DEBE FALLAR
+-- ESPERADO: Falla al intentar registrar o calcular un descuento fuera del rango o porcentaje permitido.
+-- SQLSTATE esperado: 23514 (check_violation)
+BEGIN;
+  -- TODO: Intentar registrar o asignar un descuento inválido (ej. 15% o 50%) para forzar fallo.
+ROLLBACK;
+
+
+-- =====================================================================
+-- REGLA RN-07: Exportador con varios permisos; vencimiento posterior a emisión
+-- Mecanismo: Tabla de permisos + CHECK entre columnas (fecha_vencimiento > fecha_emision)
+-- Archivo de migración: db/migrations/002_constraints.sql
+-- =====================================================================
+
+-- CASO: RN-07-OK
+-- TIPO: DEBE FUNCIONAR
+-- ESPERADO: Inserción exitosa de permiso de exportación con fecha_vencimiento estrictamente posterior a fecha_emision.
+BEGIN;
+  -- TODO: Insertar permiso de exportación con fecha_emision = CURRENT_DATE y fecha_vencimiento = CURRENT_DATE + 30.
+ROLLBACK;
+
+-- CASO: RN-07-FAIL
+-- TIPO: DEBE FALLAR
+-- ESPERADO: Falla al insertar permiso con fecha de vencimiento menor o igual a fecha de emisión.
+-- SQLSTATE esperado: 23514 (check_violation)
+BEGIN;
+  -- TODO: Insertar permiso de exportación con fecha_vencimiento <= fecha_emision.
+ROLLBACK;
+
+
+-- =====================================================================
+-- REGLA RN-08: Total del comprobante = suma de renglones con descuento; no se carga a mano
+-- Mecanismo: Función de cálculo + trigger de sincronización
+-- Archivo de migración: db/migrations/003_funciones.sql / db/migrations/005_triggers.sql
+-- =====================================================================
+
+-- CASO: RN-08-OK
+-- TIPO: DEBE FUNCIONAR
+-- ESPERADO: Al insertar renglones con descuento, el total del comprobante se calcula automáticamente como la suma de sus subtotales.
+BEGIN;
+  -- TODO: Insertar comprobante y renglones asociados; comprobar recálculo automático del total.
+ROLLBACK;
+
+-- CASO: RN-08-FAIL
+-- TIPO: DEBE FALLAR
+-- ESPERADO: Falla o rechazo al intentar asignar manualmente el total del comprobante (o forzar inconsistencia con sus renglones).
+-- SQLSTATE esperado: P0001 (raise_exception) o verificación de recálculo forzoso (a definir con Datos)
+BEGIN;
+  -- TODO: Intentar UPDATE o INSERT directo de monto total arbitrario en comprobante para comprobar rechazo.
+ROLLBACK;
+
