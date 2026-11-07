@@ -1,0 +1,40 @@
+-- =====================================================================
+-- db_tests.sql - Bodegas del Atuel
+--
+-- Suite de Pruebas de Reglas de Negocio (RN-01 a RN-15) - Etapa 2
+--
+-- Propósito:
+--   Proveer el esqueleto estandarizado para la verificación y testing de
+--   las reglas de negocio implementadas en la base de datos (restricciones,
+--   triggers, funciones y procedimientos almacenados).
+--
+-- Ejecución recomendada:
+--   docker compose exec -T db psql -U <usuario> -d <base> -v ON_ERROR_STOP=0 < /ruta/db_tests.sql
+--   O montando el archivo en el contenedor:
+--   docker compose exec -T db psql -U <usuario> -d <base> -v ON_ERROR_STOP=0 -f /ruta/db_tests.sql
+--
+-- NOTA sobre ON_ERROR_STOP=0:
+--   Se utiliza intencionalmente ON_ERROR_STOP=0 debido a que los casos de
+--   prueba de tipo "DEBE FALLAR" provocan errores esperados de PostgreSQL
+--   (violaciones de CHECK, FOREIGN KEY, UNIQUE, excepciones de triggers, etc.)
+--   para comprobar que las defensas de la base de datos reaccionan correctamente.
+--
+-- Convenciones de diseño de las pruebas:
+--   1. Aislamiento transaccional:
+--      Cada caso de prueba se ejecuta dentro de un bloque BEGIN ... ROLLBACK
+--      para asegurar que ninguna prueba deje datos residuales ni contamine
+--      el estado de la base de datos para los casos siguientes.
+--   2. Estructura de comentarios por caso:
+--      -- CASO: <identificador único, ej. RN-01-OK o RN-01-FAIL>
+--      -- TIPO: DEBE FUNCIONAR | DEBE FALLAR
+--      -- ESPERADO: <comportamiento esperado: inserción exitosa o mensaje de error>
+--      -- SQLSTATE esperado: <código de 5 caracteres PostgreSQL, ej. 23514> (solo en casos DEBE FALLAR)
+--   3. Estructura de cada bloque de regla:
+--      Cada bloque cita la regla de negocio, el mecanismo de base de datos
+--      utilizado y el archivo de migración donde reside la implementación.
+--   4. Verificación de errores esperados:
+--      En los casos DEBE FALLAR se especifica el código SQLSTATE y/o el mensaje
+--      de error esperado como referencia obligatoria para que el rol Datos
+--      confirme que el fallo se debe a la restricción testeada y no a un error no previsto.
+-- =====================================================================
+
