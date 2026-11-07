@@ -39,6 +39,7 @@ do
   echo "[init] -> $f"
   psql -v ON_ERROR_STOP=1 \
        -v app_password="$APP_DB_PASSWORD" \
+       -v ro_password="${RO_DB_PASSWORD:-cambiar_por_un_secreto_ro}" \
        -U "$USER" \
        -d "$DB" \
        -f "$f"
