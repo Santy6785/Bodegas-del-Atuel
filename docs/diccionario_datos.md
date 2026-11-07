@@ -228,8 +228,9 @@ Datos propios de un cliente exportador (subtipo 1:1 de cliente).
 |---|---|---|---|---|
 | id_cliente | INTEGER | NO | PK; FK → cliente.id_cliente | Cliente exportador. Clave y FK a cliente. |
 | pais_destino | VARCHAR(60) | NO | — | País de destino principal de las exportaciones. |
+| porcentaje_descuento | NUMERIC(5,2) | NO | *002:* DEFAULT 30.00; CHECK (0..100) | Porcentaje de descuento asignado (RN-06 base 30 %, modificable a 35 % por U6). |
 
-**Restricciones de tabla pendientes (002):** Trigger de coherencia con tipo_cliente.
+**Restricciones de tabla pendientes (002):** CHECK (porcentaje_descuento BETWEEN 0 AND 100); trigger de coherencia con tipo_cliente.
 
 ## permiso_exportacion
 

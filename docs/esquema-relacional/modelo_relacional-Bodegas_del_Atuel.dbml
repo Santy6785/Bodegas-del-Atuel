@@ -212,6 +212,7 @@ Table cliente_distribuidor {
 Table cliente_exportador {
   id_cliente int [pk]
   pais_destino varchar(60) [not null]
+  porcentaje_descuento numeric(5,2) [not null, default: 30.00, note: 'RN-06 y U6: porcentaje de descuento (base 30%, modificable a 35% con U6)']
 }
 
 Table permiso_exportacion {
