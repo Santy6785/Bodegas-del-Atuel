@@ -8,13 +8,29 @@ import { request } from "./client.js";
  * Registra un nuevo ingreso de mercadería en estado de confección.
  * POST /ingresos
  *
- * @param {object} data - Datos del ingreso (ej. cuit_bodega, cod_transportista).
- * @returns {Promise<any>} Ingreso creado.
+ * @param {object} data - Datos del ingreso a crear en el cuerpo de la petición.
+ * @param {string} data.fecha - Fecha del ingreso en formato ISO (YYYY-MM-DD).
+ * @param {number} data.cod_transportista - Código del transportista asignado.
+ * @param {string} data.cuit_bodega - CUIT de 11 dígitos de la bodega remitente.
+ * @returns {Promise<any>} Ingreso creado en estado en_confeccion.
  */
 export async function crearIngreso(data) {
   return request("/ingresos", {
     method: "POST",
     body: data
+  });
+}
+
+/**
+ * Obtiene el detalle completo de un ingreso con sus renglones y estado.
+ * GET /ingresos/{cod}
+ *
+ * @param {string|number} cod - Código único del ingreso.
+ * @returns {Promise<any>} Cabecera y renglones del ingreso.
+ */
+export async function obtenerIngreso(cod) {
+  return request(`/ingresos/${encodeURIComponent(cod)}`, {
+    method: "GET"
   });
 }
 
@@ -30,6 +46,19 @@ export async function agregarRenglonIngreso(cod, data) {
   return request(`/ingresos/${encodeURIComponent(cod)}/renglones`, {
     method: "POST",
     body: data
+  });
+}
+
+/**
+ * Cambia el estado de un ingreso a terminado para habilitar su procesamiento.
+ * POST /ingresos/{cod}/terminar
+ *
+ * @param {string|number} cod - Código único del ingreso.
+ * @returns {Promise<any>} Ingreso actualizado en estado terminado.
+ */
+export async function terminarIngreso(cod) {
+  return request(`/ingresos/${encodeURIComponent(cod)}/terminar`, {
+    method: "POST"
   });
 }
 

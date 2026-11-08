@@ -29,12 +29,13 @@ Permitir la consulta, búsqueda y filtrado paginado de los vinos del catálogo i
 
 #### b) Datos que muestra y datos que envía
 - **Datos que envía (Filtros de búsqueda y paginación):**
-  - `tipo` (string, select: tinto, blanco, rosado, espumoso).
-  - `cepa` (string/id, select).
-  - `bodega` (string/cuit, select).
-  - `anada` (number/string, año de cosecha).
+  - `tipo` (string, select: tinto, blanco, rosado, espumante).
+  - `id_cepa` (number, select: ID numérico de la cepa).
+  - `cuit_bodega` (string de 11 dígitos, select: CUIT de la bodega).
+  - `anada` (number, año de cosecha).
+  - `nombre` (string, búsqueda parcial por nombre comercial).
   - `page` (number, página actual).
-  - `pageSize` (number, tamaño de página).
+  - `page_size` (number, cantidad de registros por página).
 - **Datos que muestra en la grilla principal:**
   - Código de vino (`cod_vino`), Nombre comercial (`nombre`), Tipo (`tipo`), Añada (`anada`), Precio unitario vigente (`precio`), Bodega productora (`nombre_bodega` o `cuit_bodega`).
   - Paginador interactivo (`anterior`, `siguiente`, número de página actual).
@@ -47,13 +48,13 @@ Permitir la consulta, búsqueda y filtrado paginado de los vinos del catálogo i
 #### c) Tabla de Endpoints y Mapeo
 | Dato / Acción | Endpoint | Método | Parámetros | Campo en Respuesta | Función en `front/js/api/` | Origen |
 |---|---|---|---|---|---|---|
-| Listado general filtrado y paginado | `/vinos` | `GET` | **Query:** `tipo`, `cepa`, `bodega`, `anada`, `page`, `pageSize` | Array de vinos `items` (o array raíz) y metadatos de paginación (`total`, `page`, `pageSize`) | `listarVinos(filtros)` en `vinos.js` | Enunciado / Bocetos (Issue #12) |
-| Detalle enológico completo (composición y maridaje) | `/vinos/{cod}` | `GET` | **Ruta:** `cod` (cod_vino) | Objeto con datos de vino, array `cepas: [{ id_cepa, nombre, porcentaje }]`, array `maridajes: [{ nombre, temperatura_servicio }]` | `obtenerVino(cod)` en `vinos.js` | Enunciado / Bocetos (Issue #12) |
+| Listado general filtrado y paginado | `/vinos` | `GET` | **Query:** `page`, `page_size`, `tipo`, `id_cepa`, `cuit_bodega`, `anada`, `nombre` | Objeto `{ items, page, page_size, total }` con array de vinos y metadatos de paginación | `listarVinos(filtros)` en `vinos.js` | Enunciado / Bocetos (Issue #12) |
+| Detalle enológico completo (composición y maridaje) | `/vinos/{cod}` | `GET` | **Ruta:** `cod` (cod_vino) | Objeto con datos de vino, bodega, array `composicion: [{ id_cepa, nombre, tipo, porcentaje }]`, array `maridajes: [{ id_maridaje, nombre, temperatura_servicio }]` y objeto `stock` | `obtenerVino(cod)` en `vinos.js` | Enunciado / Bocetos (Issue #12) |
 | Catálogo de cepas (para combo de filtro) | `/cepas` | `GET` | Ninguno | Array de cepas `[{ id_cepa, nombre, tipo }]` | `listarCepas()` *(función sugerida)* | **PROPUESTO** (No listado en mínimos) |
 | Catálogo de bodegas (para combo de filtro) | `/bodegas` | `GET` | Ninguno | Array de bodegas `[{ cuit, razon_social, nombre_fantasia }]` | `listarBodegas()` *(función sugerida)* | **PROPUESTO** (No listado en mínimos) |
 
 #### d) Flujo Paso a Paso
-1. Al cargar la pantalla, se solicitan en paralelo los datos de los selectores auxiliares (`GET /cepas` y `GET /bodegas`) y el primer lote de vinos (`GET /vinos?page=1&pageSize=10`).
+1. Al cargar la pantalla, se solicitan en paralelo los datos de los selectores auxiliares (`GET /cepas` y `GET /bodegas`) y el primer lote de vinos (`GET /vinos?page=1&page_size=20`).
 2. Se renderiza la tabla de resultados y los controles de paginación.
 3. Al interactuar con los filtros y presionar *"Buscar"* (o cambiar de página), se dispara nuevamente `listarVinos()` con los parámetros acumulados y se refresca el contenido de la tabla.
 4. Al hacer clic en el botón *"Detalle"* de una fila, se invoca `obtenerVino(cod)` pasando el código del vino seleccionado.
@@ -82,13 +83,14 @@ Registrar nuevos vinos en el catálogo comercial o modificar los atributos y cor
 #### b) Datos que muestra y datos que envía
 - **Datos que envía (Formulario de alta / edición):**
   - `nombre` (string, nombre comercial).
+  - `tipo` (enum tipo_vino de la base: `'tinto'`, `'blanco'`, `'rosado'`, `'espumante'`).
   - `anada` (number, año de cosecha).
-  - `precio` (number, precio de venta > 0, RN-01).
-  - `tipo` (enum: `'tinto'`, `'blanco'`, `'rosado'`, `'espumoso'`, RN-15).
   - `volumen_ml` (number, volumen en mililitros: ej. 750).
-  - `graduacion_alcoholica` (number, porcentaje alcohólico).
-  - `cuit_bodega` (string/cuit, bodega productora seleccionada).
-  - `cepas` (array de composición): lista de objetos `[{ id_cepa: number, porcentaje: number }]`.
+  - `graduacion` (string/number decimal, graduación alcohólica entre 5 y 20, RN-15).
+  - `precio` (string/number decimal, precio de venta > 0, RN-01).
+  - `cuit_bodega` (string de 11 dígitos, bodega productora seleccionada).
+  - `composicion` (array de composición): lista de objetos `[{ id_cepa: number, porcentaje: string }]` (la suma debe ser 100, RN-05).
+  - `maridajes` (array de IDs): lista de identificadores numéricos de maridaje `[id_maridaje]`.
 - **Datos que muestra:**
   - Formulario con campos de texto, numéricos y selectores precargados con los catálogos correspondientes.
   - En modo edición: datos actuales del vino recuperados previamente con `GET /vinos/{cod}`.
@@ -98,17 +100,17 @@ Registrar nuevos vinos en el catálogo comercial o modificar los atributos y cor
 #### c) Tabla de Endpoints y Mapeo
 | Dato / Acción | Endpoint | Método | Parámetros | Campo en Respuesta | Función en `front/js/api/` | Origen |
 |---|---|---|---|---|---|---|
-| Crear nuevo vino con composición | `/vinos` | `POST` | **Body:** `{ nombre, anada, precio, tipo, volumen_ml, graduacion_alcoholica, cuit_bodega, cepas }` | Vino creado con su `cod_vino` asignado | `crearVino(data)` en `vinos.js` | Enunciado / Bocetos |
-| Consultar vino para precargar en edición | `/vinos/{cod}` | `GET` | **Ruta:** `cod` | Objeto vino completo incluyendo array `cepas` | `obtenerVino(cod)` en `vinos.js` | Enunciado |
-| Guardar cambios de un vino existente | `/vinos/{cod}` | `PUT` | **Ruta:** `cod`<br>**Body:** Datos modificados del vino y composición | Vino actualizado | `actualizarVino(cod, data)` en `vinos.js` | Enunciado |
+| Crear nuevo vino con composición | `/vinos` | `POST` | **Body:** `{ nombre, tipo, anada, volumen_ml, graduacion, precio, cuit_bodega, composicion: [{ id_cepa, porcentaje }], maridajes: [id] }` | Vino creado con su `cod_vino` asignado | `crearVino(data)` en `vinos.js` | Enunciado / Bocetos |
+| Consultar vino para precargar en edición | `/vinos/{cod}` | `GET` | **Ruta:** `cod` | Objeto vino completo incluyendo arrays `composicion` y `maridajes` | `obtenerVino(cod)` en `vinos.js` | Enunciado |
+| Guardar cambios de un vino existente | `/vinos/{cod}` | `PUT` | **Ruta:** `cod`<br>**Body:** `{ nombre, tipo, anada, volumen_ml, graduacion, precio, cuit_bodega, composicion: [{ id_cepa, porcentaje }], maridajes: [id] }` | Vino actualizado | `actualizarVino(cod, data)` en `vinos.js` | Enunciado |
 | Dar de baja un vino | `/vinos/{cod}` | `DELETE` | **Ruta:** `cod` | Confirmación de eliminación / `204 No Content` | `eliminarVino(cod)` en `vinos.js` | Enunciado |
 | Catálogo de cepas disponibles | `/cepas` | `GET` | Ninguno | Array de cepas `[{ id_cepa, nombre, tipo }]` | `listarCepas()` *(función sugerida)* | **PROPUESTO** |
 | Catálogo de bodegas disponibles | `/bodegas` | `GET` | Ninguno | Array de bodegas `[{ cuit, razon_social }]` | `listarBodegas()` *(función sugerida)* | **PROPUESTO** |
 
 #### d) Flujo Paso a Paso
 1. Se cargan los selectores de Cepas (`GET /cepas`) y Bodegas (`GET /bodegas`).
-2. Si la ruta es de edición (`#/vinos/editar/:cod`), se invoca `obtenerVino(cod)` y se pueblan todos los inputs del formulario y los renglones de cepas.
-3. El usuario completa los datos y define la composición agregando o quitando filas de cepas con sus respectivos porcentajes.
+2. Si la ruta es de edición (`#/vinos/editar/:cod`), se invoca `obtenerVino(cod)` y se pueblan todos los inputs del formulario, la composición de cepas y los maridajes seleccionados.
+3. El usuario completa los datos y define la composición agregando o quitando filas de cepas (`id_cepa`) con sus respectivos porcentajes (`porcentaje`), y asigna los maridajes (`maridajes`).
 4. Al hacer clic en *"Guardar Vino"*, el front arma el payload JSON y ejecuta `crearVino(data)` o `actualizarVino(cod, data)`.
 5. Si la API responde con éxito (`200` o `201`), se notifica al usuario y se redirige al Catálogo (`#/vinos`).
 6. Si la API rechaza la operación (ej. porcentajes no suman 100), se captura el `ApiError` y se despliega su `message` textualmente en la caja de alertas del formulario.
@@ -117,7 +119,7 @@ Registrar nuevos vinos en el catálogo comercial o modificar los atributos y cor
 #### e) Errores Esperables y Tratamiento
 | Escenario de Error | Regla / Restricción | SQLSTATE | HTTP Status | Tratamiento en Frontend |
 |---|---|---|---|---|
-| Composición de cepas no suma 100% | **RN-05** (Constraint trigger diferido en `vino_cepa`) | `P0001` (Raise Exception) | `409 Conflict` o `422 Unprocessable Entity` | Se muestra textualmente el mensaje del backend: *"RN-05: La suma de porcentajes de las cepas debe ser exactamente 100%."* |
+| Composición de cepas no suma 100% | **RN-05** (Constraint trigger diferido en `vino_cepa`, se valida al commit) | `P0001` (Raise Exception) | `409 Conflict` | Se muestra textualmente el mensaje del backend: *"RN-05: La suma de porcentajes de las cepas debe ser exactamente 100%."* |
 | Vino duplicado (mismo nombre, añada y volumen) | Clave candidata `UNIQUE(nombre, anada, volumen_ml)` | `23505` (unique_violation) | `409 Conflict` | Muestra el error de la API indicando que ya existe un vino con dicha combinación. |
 | Precio menor o igual a cero | **RN-01** (`CHECK precio > 0`) | `23514` (check_violation) | `422 Unprocessable Entity` | Se muestra el mensaje devuelto por el backend. |
 | Campos obligatorios nulos (ej. bodega) | Restricción `NOT NULL` | `23502` (not_null_violation) | `422 Unprocessable Entity` | Muestra qué campo obligatorio falta según la API. |
@@ -184,7 +186,7 @@ Registrar la emisión de un comprobante de venta de vinos a un cliente determina
 | Bloqueo concurrente por alta demanda en sala | Concurrencia transaccional / serialización | `40001` o `40P01` | `503 Service Unavailable` | Mensaje de reintento de operación devuelto por el backend. |
 
 #### g) Qué NO calcula el Front
-- No aplica el porcentaje de descuento del cliente (10% socio, 15% distribuidor, 20% exportador) de forma manual.
+- No aplica el porcentaje de descuento del cliente (10% socio, 20% distribuidor, 30% exportador) de forma manual.
 - No multiplica precio por cantidad ni deduce subtotales.
 - No suma los renglones para obtener el total general.
 - No descuenta ni consulta el saldo de stock en memoria para decidir si habilita la venta; es el backend quien rechaza o aprueba atómicamente la transacción.
@@ -231,7 +233,7 @@ Administrar las solicitudes de reposición de botellas de vino desde el depósit
 |---|---|---|---|---|
 | `en_confeccion` | - **Agregar Renglón**<br>- **Quitar Renglón**<br>- **Terminar Transferencia**<br>- **Eliminar Transferencia** | - `POST /transferencias/{nro}/renglones`<br>- `DELETE /transferencias/{nro}/renglones/{cod}`<br>- `POST /transferencias/{nro}/terminar`<br>- `DELETE /transferencias/{nro}` | `terminado` (si se termina) o se mantiene `en_confeccion` | **RN-12**: Solo se permite alterar renglones si está en confección.<br>**RN-11**: Fecha inmutable. |
 | `terminado` | - **Procesar Transferencia** *(Modificar y agregar renglones quedan estrictamente bloqueados)* | - `POST /transferencias/{nro}/procesar` | `procesado` | **RN-11**: Solo se puede procesar si está terminado.<br>**RN-12**: No se admiten cambios en renglones. |
-| `procesado` | *Ninguno* (Documento histórico cerrado e inmutable) | *Sin endpoints de modificación* | Estado final | **RN-10**, **RN-11**: El movimiento ya impactó en las tablas de stock; no puede revertirse ni alterarse. |
+| `procesado` | *Ninguno* (Documento histórico cerrado e inmutable) | *Sin endpoints de modificación* | Estado final | **RN-11**: El movimiento ya impactó en las tablas de stock; no puede revertirse ni alterarse. |
 
 #### f) Errores Esperables y Tratamiento
 | Escenario de Error | Regla / Restricción | SQLSTATE | HTTP Status | Tratamiento en Frontend |
@@ -255,29 +257,29 @@ Brindar al personal de gestión y supervisión una vista ejecutiva con indicador
 
 #### b) Datos que muestra y datos que envía
 - **Widget 1: Top 10 Vinos Más Vendidos:**
-  - *Datos que envía:* Parámetro de límite (ej. `limite=10`).
-  - *Datos que muestra:* Ranking ordenado del 1 al 10 con nombre del vino, añada, cantidad de botellas vendidas e importe acumulado.
+  - *Datos que envía:* Parámetro de límite `limit=10` (por defecto 10, máx. 100).
+  - *Datos que muestra:* Ranking ordenado con posición, código de vino, nombre comercial y botellas vendidas (`{ posicion, cod_vino, nombre, botellas_vendidas }`).
 - **Widget 2: Ventas por Sala en el Último Trimestre:**
-  - *Datos que envía:* Rango temporal o parámetro de período (ej. `fecha_desde` y `fecha_hasta` o `trimestre=ultimo`).
-  - *Datos que muestra:* Gráfico de barras comparativo y tabla resumen con Sala de Venta (`nombre`) vs. Total Facturado en Pesos (`total_ventas`).
+  - *Datos que envía:* Sin parámetros de consulta (el período relativo "último trimestre" es calculado en la base de datos con `CURRENT_DATE`).
+  - *Datos que muestra:* Gráfico de barras comparativo y tabla resumen con Sala de Venta (`id_sala`, `calle`, `numero`) vs. Total Facturado en Pesos (`monto_total`).
 - **Widget 3: Vinos Sin Stock en Sala:**
-  - *Datos que envía:* `sala_id` (number, identificador de la sala seleccionada en el combo).
-  - *Datos que muestra:* Listado de vinos cuyo saldo disponible en esa sala es igual a 0 botellas (ej. *"Merlot (375ml) - 0 botellas"*, *"Syrah - 0 botellas"*).
+  - *Datos que envía:* `id_sala` (number, identificador obligatorio de la sala seleccionada en el combo).
+  - *Datos que muestra:* Listado de vinos cuyo stock es cero en esa sala (`{ cod_vino, nombre, stock_deposito }`), indicando además el stock en depósito central.
 
 #### c) Tabla de Endpoints y Mapeo
 | Dato / Acción | Endpoint | Método | Parámetros | Campo en Respuesta | Función en `front/js/api/` | Origen |
 |---|---|---|---|---|---|---|
-| Ranking de vinos más vendidos | `/reportes/top-vinos` | `GET` | **Query:** `limite=10` | Array `[{ cod_vino, nombre, total_vendido, recaudacion }]` | `topVinos(params)` en `reportes.js` | Enunciado / Boceto #5 |
-| Recaudación por sala (trimestre) | `/reportes/ventas-por-sala` | `GET` | **Query:** `fecha_desde`, `fecha_hasta` | Array `[{ id_sala, nombre_sala, total_facturado }]` | `ventasPorSala(params)` en `reportes.js` | Enunciado / Boceto #5 |
-| Consulta de vinos agotados por sala | `/reportes/vinos-sin-stock` | `GET` | **Query:** `sala_id` | Array `[{ cod_vino, nombre, volumen_ml, cantidad: 0 }]` | `vinosSinStock(params)` en `reportes.js` | Enunciado / Boceto #5 |
-| Selector de salas para filtrado de quiebres | `/salas` | `GET` | Ninguno | Array de salas `[{ id_sala, nombre }]` | `listarSalas()` *(función sugerida)* | **PROPUESTO** |
+| Ranking de vinos más vendidos | `/reportes/top-vinos` | `GET` | **Query:** `limit=10` | Array `[{ posicion, cod_vino, nombre, botellas_vendidas }]` | `topVinos(params)` en `reportes.js` | Enunciado / Boceto #5 |
+| Recaudación por sala (trimestre) | `/reportes/ventas-por-sala` | `GET` | Ninguno | Array `[{ id_sala, calle, numero, monto_total }]` | `ventasPorSala()` en `reportes.js` | Enunciado / Boceto #5 |
+| Consulta de vinos agotados por sala | `/reportes/vinos-sin-stock` | `GET` | **Query:** `id_sala` (obligatorio) | Array `[{ cod_vino, nombre, stock_deposito }]` | `vinosSinStock(params)` en `reportes.js` | Enunciado / Boceto #5 |
+| Selector de salas para filtrado de quiebres | `/salas` | `GET` | Ninguno | Array de salas `[{ id_sala, calle, numero, dia_cierre, codigo_postal }]` | `listarSalas()` *(función sugerida)* | **PROPUESTO** |
 
 #### d) Flujo Paso a Paso
-1. Al acceder al Tablero, se disparan en paralelo las peticiones para el Top 10 (`GET /reportes/top-vinos?limite=10`), las ventas trimestrales (`GET /reportes/ventas-por-sala`) y el catálogo de salas (`GET /salas`).
+1. Al acceder al Tablero, se disparan en paralelo las peticiones para el Top 10 (`GET /reportes/top-vinos?limit=10`), las ventas trimestrales (`GET /reportes/ventas-por-sala`) y el catálogo de salas (`GET /salas`).
 2. Se dibuja el listado del Top 10 con los totales devueltos.
 3. Se renderiza el gráfico de barras comparativo de ventas por sala utilizando las alturas proporcionales de las barras calculadas visualmente según el valor de recaudación enviado por el servidor.
-4. El selector de salas del Widget 3 se inicializa por defecto con la primera sala disponible y se ejecuta `vinosSinStock({ sala_id })`.
-5. Si el usuario cambia la sala en el selector, se dispara nuevamente `vinosSinStock({ sala_id: nuevoId })` y se actualiza dinámicamente la lista de productos agotados.
+4. El selector de salas del Widget 3 se inicializa por defecto con la primera sala disponible y se ejecuta `vinosSinStock({ id_sala })`.
+5. Si el usuario cambia la sala en el selector, se dispara nuevamente `vinosSinStock({ id_sala: nuevoId })` y se actualiza dinámicamente la lista de productos agotados.
 
 #### e) Errores Esperables y Tratamiento
 | Escenario de Error | Regla / Restricción | SQLSTATE | HTTP Status | Tratamiento en Frontend |
@@ -305,7 +307,7 @@ La tabla siguiente define el estado de cada catálogo requerido por la interfaz:
 | **Bodegas** | - Catálogo (Filtro)<br>- Alta/Edición de Vino | `GET /bodegas` | **PROPUESTO / FALTANTE** | `listarBodegas()` | Permite asociar el vino con la bodega elaboradora (`cuit_bodega`). No figura en los mínimos del enunciado. |
 | **Salas de Venta** | - Nueva Venta<br>- Transferencias (Solicitante)<br>- Tablero (Filtro stock) | `GET /salas` | **PROPUESTO / FALTANTE** | `listarSalas()` | Esencial para asignar comprobantes a su punto de venta y direccionar transferencias. No figura en los mínimos del enunciado. |
 | **Maridajes** | - Detalle de Vino (Catálogo)<br>- Alta de Maridajes | `GET /maridajes` | **PROPUESTO / FALTANTE** | `listarMaridajes()` | Requerido si se desea asociar o consultar maridajes formalmente. No figura en los mínimos del enunciado. |
-| **Tipos de Vino** | - Catálogo (Filtro)<br>- Alta/Edición de Vino | *Enum local o* `GET /catalogos/tipos-vino` | **PROPUESTO** | `listarTiposVino()` | Se basa en el enum de BD (`tinto`, `blanco`, `rosado`, `espumoso`, RN-15). Puede consumirse de endpoint o inferirse del estándar cerrado del dominio. |
+| **Tipos de Vino** | - Catálogo (Filtro)<br>- Alta/Edición de Vino | *Enum local o* `GET /catalogos/tipos-vino` | **PROPUESTO** | `listarTiposVino()` | Se basa en el enum tipo_vino de la base (`'tinto'`, `'blanco'`, `'rosado'`, `'espumante'`). Puede consumirse de endpoint o inferirse del estándar cerrado del dominio. |
 | **Clientes** | - Nueva Venta | `GET /clientes` | **EXISTENTE (Enunciado)** | `listarClientes(filtros)` en `clientes.js` | Devuelve clientes (socios, distribuidores, exportadores) para vincular al comprobante. |
 | **Vinos (Activos)** | - Nueva Venta (Renglones)<br>- Transferencias (Renglones) | `GET /vinos` | **EXISTENTE (Enunciado)** | `listarVinos(filtros)` en `vinos.js` | Se utiliza para autocompletar la selección de botellas a vender o transferir. |
 | **Historial de Transferencias** | - Transferencias (Grilla) | `GET /transferencias` | **PROPUESTO / FALTANTE** | `listarTransferencias(filtros)` | El boceto de la pantalla #4 exige listar las transferencias existentes y sus estados (`en_confeccion`, `terminado`, `procesado`). El enunciado solo incluye `POST` para el circuito. |
@@ -326,7 +328,7 @@ La siguiente matriz cruza cada pantalla diseñada con los endpoints correspondie
 | `/vinos/{cod}` | `DELETE` | - | **Baja (RN-14)** | - | - | - | Enunciado / Implementado |
 | `/cepas` | `GET` | Lookup (Filtro) | Lookup (Corte) | - | - | - | **PROPUESTO / FALTANTE** |
 | `/bodegas` | `GET` | Lookup (Filtro) | Lookup (Bodega) | - | - | - | **PROPUESTO / FALTANTE** |
-| `/maridajes` | `GET` | Lookup (Filtro) | - | - | - | - | **PROPUESTO / FALTANTE** |
+| `/maridajes` | `GET` | Lookup (Filtro) | Lookup (Maridajes) | - | - | - | **PROPUESTO / FALTANTE** |
 | `/clientes` | `GET` | - | - | **Lookup (Cliente)** | - | - | Enunciado / Implementado |
 | `/salas` | `GET` | - | - | **Lookup (Sala)** | **Lookup (Sala)** | **Lookup (Filtro)** | **PROPUESTO / FALTANTE** |
 | `/comprobantes` | `POST` | - | - | **Emisión de Venta** | - | - | Enunciado / Implementado |
@@ -361,45 +363,47 @@ Al contrastar los requerimientos de interfaz plasmados en los bocetos de la issu
 - **Propuesta de solución:** Exponer `GET /transferencias?id_sala=&estado=&page=` que devuelva el encabezado de las transferencias junto con sus renglones para alimentar la grilla de seguimiento.
 
 ### Brecha 3: Parámetro de sala en reporte de vinos sin stock
-- **Qué falta:** El endpoint mínimo `/reportes/vinos-sin-stock` está definido a nivel general, pero el boceto del Tablero requiere consultar los vinos agotados de una **sala seleccionada** en particular (`/reportes/vinos-sin-stock?sala_id={id}`).
+- **Qué falta:** El contrato `docs/api-contrato.md` define que `GET /reportes/vinos-sin-stock` requiere obligatoriamente `id_sala` (`/reportes/vinos-sin-stock?id_sala={id_sala}`).
 - **Qué pantalla lo necesita:** Pantalla 5 (Tablero de Control - Widget 3).
-- **Propuesta de solución:** Aceptar el parámetro opcional `sala_id` (o `id_sala`) en la query string de `/reportes/vinos-sin-stock`. Si se omite, devolver el stock en cero consolidado de todas las salas.
+- **Alineación con el contrato:** El frontend debe enviar siempre el parámetro `id_sala` con el ID de la sala seleccionada en el combo, cumpliendo con la nomenclatura `snake_case` del contrato.
 
 ### Brecha 4: Parámetros de rango temporal en ventas por sala
-- **Qué falta:** El reporte del Tablero estipula *"Ventas por sala en el último trimestre"*, requiriendo poder filtrar o segmentar por fecha de comprobante.
+- **Qué falta:** El reporte del Tablero estipula *"Ventas por sala en el último trimestre"*. Según el contrato `docs/api-contrato.md`, este endpoint no recibe parámetros de fecha ya que el backend calcula los períodos relativos automáticamente en PostgreSQL con `CURRENT_DATE`.
 - **Qué pantalla lo necesita:** Pantalla 5 (Tablero de Control - Widget 2).
-- **Propuesta de solución:** Permitir los parámetros opcionales `fecha_desde` y `fecha_hasta` (formato ISO `YYYY-MM-DD`) en `GET /reportes/ventas-por-sala`.
+- **Alineación con el contrato:** El frontend invoca `GET /reportes/ventas-por-sala` sin parámetros de consulta.
 
 ### Brecha 5: Estructura de paginación en `/vinos` y listados
 - **Qué falta:** Definir el contrato exacto de paginación entre front y backend para evitar discrepancias.
 - **Propuesta de solución:**
-  - Parámetros de petición: `page` (número base 1) y `pageSize` (límite de ítems).
-  - Estructura de respuesta recomendada:
+  - Parámetros de petición: `page` (número base 1) y `page_size` (límite de ítems, máx. 100).
+  - Estructura de respuesta según el contrato:
     ```json
     {
       "items": [ /* lista de elementos */ ],
       "total": 128,
       "page": 1,
-      "pageSize": 10,
-      "total_pages": 13
+      "page_size": 20
     }
     ```
 
 ### Brecha 6: Formato unificado de respuestas de error
 - **Qué falta:** Estandarizar la clave donde viaja el mensaje textual de error para que la capa `client.js` lo extraiga limpiamente sin ambigüedad.
 - **Propuesta de solución:**
-  - Utilizar un formato consistente de error con código HTTP coherente (400, 404, 409, 422, 500):
+  - Utilizar el formato unificado de error especificado en la sección 1.1 de `docs/api-contrato.md`:
     ```json
     {
-      "error": "RN-09",
-      "mensaje": "Stock insuficiente del vino Malbec Reserva en la sala 1! Venta rechazada."
+      "error": {
+        "sqlstate": "P0001",
+        "mensaje": "Stock insuficiente del vino 10 en la sala 1 (RN-09)",
+        "restriccion": null
+      }
     }
     ```
 
 ### Brecha 7: Composición de cortes de cepa en `POST /vinos`
 - **Qué falta:** RN-05 exige que la composición de un vino sume exactamente 100% mediante un constraint trigger diferido (`DEFERRABLE INITIALLY DEFERRED`). Si la API exigiera insertar primero el vino y luego cada cepa por llamadas HTTP independientes, el trigger fallaría en la base al hacer commit si no se maneja dentro de la misma transacción.
 - **Qué pantalla lo necesita:** Pantalla 2 (Alta y Edición de Vino).
-- **Propuesta de solución:** Que `POST /vinos` y `PUT /vinos/{cod}` acepten el array `cepas: [{ id_cepa, porcentaje }]` dentro del mismo cuerpo JSON, realizando la inserción del vino y de los registros de `vino_cepa` en una única transacción transaccional atómica en PostgreSQL.
+- **Propuesta de solución:** Que `POST /vinos` y `PUT /vinos/{cod}` acepten los arrays `composicion: [{ id_cepa, porcentaje }]` y `maridajes: [id]` dentro del mismo cuerpo JSON, realizando la inserción del vino y de los registros de `vino_cepa` y `vino_maridaje` en una única transacción atómica en PostgreSQL.
 
 ---
 
@@ -407,7 +411,7 @@ Al contrastar los requerimientos de interfaz plasmados en los bocetos de la issu
 
 1. **Atribución de Comprobantes:** Se asume que `POST /comprobantes` recibe tanto la cabecera (`id_cliente`, `id_sala`) como la lista completa de renglones en un único payload, evitando múltiples llamadas para agregar renglones individuales de venta.
 2. **Autenticación y Permisos:** Por el momento no se contempla login ni JWT en este mapeo; se asume que la sala de venta se elige manualmente desde un combo o que el sistema opera en modo mostrador abierto. Si se incorpora autenticación, la sala y el empleado podrían deducirse del token.
-3. **Persistencia de Maridajes:** En el boceto del catálogo, el detalle de vino muestra maridajes y temperatura. Se asume que estos datos provienen de la tabla `vino_maridaje` y `maridaje` vía `GET /vinos/{cod}` y que el alta de maridajes para vinos se gestionará en una etapa complementaria.
+3. **Persistencia de Maridajes:** En el boceto del catálogo, el detalle de vino muestra maridajes y temperatura (`vino_maridaje` y `maridaje` vía `GET /vinos/{cod}`). Para el alta y edición, el contrato `POST /vinos` y `PUT /vinos/{cod}` ya incorpora el campo `maridajes` como una lista de identificadores numéricos `[id_maridaje]`.
 4. **Política CORS:** Se asume que el backend configurará cabeceras CORS para habilitar peticiones originadas en `http://localhost:5500`.
 5. **Precisión Numérica de Moneda:** Se asume que los importes monetarios vienen tipados como números de punto flotante o cadenas numéricas exactas directamente desde el backend (PostgreSQL `NUMERIC(10,2)`), y el front solo agrega el símbolo `$` y el separador de miles.
 

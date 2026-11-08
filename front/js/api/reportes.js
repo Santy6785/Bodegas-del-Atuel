@@ -11,55 +11,55 @@ import { request } from "./client.js";
  * Obtiene el ranking de vinos más vendidos.
  * GET /reportes/top-vinos
  *
- * @param {object} [params={}] - Parámetros de filtrado (ej. limite, fecha_desde, fecha_hasta).
+ * @param {object} [params={}] - Parámetros de consulta.
+ * @param {number} [params.limit=10] - Cantidad máxima de vinos en el ranking (por defecto 10, máx. 100).
  * @returns {Promise<any>} Listado de vinos más vendidos.
  */
 export async function topVinos(params = {}) {
+  const limit = typeof params === "object" && params !== null ? params.limit : params;
   return request("/reportes/top-vinos", {
     method: "GET",
-    params
+    params: { limit }
   });
 }
 
 /**
- * Obtiene el reporte de ventas agrupado por sala de venta.
+ * Obtiene el reporte de ventas agrupado por sala de venta en el último trimestre.
  * GET /reportes/ventas-por-sala
  *
- * @param {object} [params={}] - Parámetros de filtrado (ej. fecha_desde, fecha_hasta).
  * @returns {Promise<any>} Totales de ventas por sala.
  */
-export async function ventasPorSala(params = {}) {
+export async function ventasPorSala() {
   return request("/reportes/ventas-por-sala", {
-    method: "GET",
-    params
+    method: "GET"
   });
 }
 
 /**
- * Obtiene la lista de vinos que se encuentran sin stock disponible.
+ * Obtiene la lista de vinos que se encuentran sin stock disponible en una sala.
  * GET /reportes/vinos-sin-stock
  *
- * @param {object} [params={}] - Parámetros de consulta (ej. id_sala o depósito).
- * @returns {Promise<any>} Vinos con stock en cero.
+ * @param {object} params - Parámetros de consulta obligatorios.
+ * @param {number|string} params.id_sala - Identificador de la sala de venta (obligatorio, no sala_id).
+ * @returns {Promise<any>} Vinos con stock en cero en la sala indicada.
  */
 export async function vinosSinStock(params = {}) {
+  const id_sala = typeof params === "object" && params !== null ? params.id_sala : params;
   return request("/reportes/vinos-sin-stock", {
     method: "GET",
-    params
+    params: { id_sala }
   });
 }
 
 /**
- * Obtiene el reporte del transportista con mayor actividad registrada.
+ * Obtiene el reporte del transportista con mayor actividad registrada en el último mes.
  * GET /reportes/transportista-activo
  *
- * @param {object} [params={}] - Parámetros de consulta o rango de fechas.
  * @returns {Promise<any>} Datos del transportista más activo.
  */
-export async function transportistaActivo(params = {}) {
+export async function transportistaActivo() {
   return request("/reportes/transportista-activo", {
-    method: "GET",
-    params
+    method: "GET"
   });
 }
 
