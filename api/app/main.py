@@ -5,12 +5,13 @@ from contextlib import asynccontextmanager
 
 import psycopg
 import psycopg_pool
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.db.pool import close_pool, get_conn, open_pool
 from app.db.queries.salud import verificar_conexion
+from app.errors import register_exception_handlers, traducir_error
 
 
 @asynccontextmanager
@@ -27,6 +28,8 @@ app = FastAPI(
     description="API REST del Sistema de Gestión Vitivinícola Bodegas del Atuel (UTN FRSR)",
     lifespan=lifespan,
 )
+
+register_exception_handlers(app)
 
 # CORS: permitir conexiones desde el Frontend (puerto 5173 o 3000)
 cors_origins_raw = os.environ.get(
@@ -45,12 +48,20 @@ app.add_middleware(
 
 @app.exception_handler(psycopg.OperationalError)
 @app.exception_handler(psycopg_pool.PoolTimeout)
-async def _error_base_inaccesible(request: Request, exc: Exception):
-    """Traduce fallas de conexión a 503 sin exponer detalles internos."""
-    return JSONResponse(
-        status_code=503,
-        content={"estado": "error", "base_de_datos": "inaccesible"},
-    )
+async def _error_conexion(request: Request, exc: psycopg.Error):
+    """Traduce fallas de conexión.
+
+    GET /salud conserva su cuerpo propio exigido por test_salud.py. Cualquier
+    otro endpoint responde con el formato anidado del contrato §1.1,
+    delegando en traducir_error (clase 08 -> 503 "No hay conexión...").
+    """
+    if request.url.path == "/salud":
+        return JSONResponse(
+            status_code=503,
+            content={"estado": "error", "base_de_datos": "inaccesible"},
+        )
+    status_code, cuerpo, headers = traducir_error(exc, request.method)
+    return JSONResponse(status_code=status_code, content=cuerpo, headers=headers)
 
 
 @app.get("/salud", tags=["Salud"])
