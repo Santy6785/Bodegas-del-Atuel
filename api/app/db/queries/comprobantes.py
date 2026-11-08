@@ -64,6 +64,65 @@ def crear_comprobante(
             return int(next(iter(row.values())))
 
 
+def crear_comprobante_directo(
+    conn: psycopg.Connection,
+    id_cliente: int,
+    id_sala: int,
+    cod_vinos: list[int],
+    cantidades: list[int],
+) -> int:
+    """Crea un comprobante insertando cabecera y renglones directamente.
+
+    Se usa cuando ``sp_crear_comprobante`` no está disponible en la base.
+    Los triggers de la base aplican las reglas de negocio:
+    RN-09 (stock insuficiente en sala), RN-06 (descuento por cliente),
+    RN-08 (subtotal/total del renglón y cabecera).
+
+    Tipo de operación: Escritura.
+    Transacción: Sí (explícita).
+    Objeto de base: Tablas comprobante y renglon_comprobante.
+
+    Parámetros:
+        conn: Conexión activa a PostgreSQL.
+        id_cliente: Identificador del cliente comprador.
+        id_sala: Identificador de la sala de venta emisora.
+        cod_vinos: Lista de identificadores de vinos adquiridos.
+        cantidades: Lista de cantidades de botellas por vino.
+
+    Devuelve:
+        int: Número de comprobante generado.
+
+    Errores posibles:
+        ValueError: Si las listas están vacías o difieren en tamaño.
+        psycopg.errors.ForeignKeyViolation (23503): Cliente, sala o vino inexistente.
+        psycopg.errors.CheckViolation (23514): Cantidad de botellas <= 0.
+        psycopg.errors.RaiseException (P0001): Stock insuficiente en la sala (RN-09).
+    """
+    if not cod_vinos or not cantidades:
+        raise ValueError("Las listas de vinos y cantidades no pueden estar vacías")
+    if len(cod_vinos) != len(cantidades):
+        raise ValueError("Las listas de vinos y cantidades deben tener la misma longitud")
+
+    with conn.transaction():
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO comprobante (id_cliente, id_sala) VALUES (%s, %s) "
+                "RETURNING nro_comprobante",
+                (id_cliente, id_sala),
+            )
+            row = cur.fetchone()
+            nro_comprobante = int(row["nro_comprobante"])
+
+            for cod_vino, cantidad in zip(cod_vinos, cantidades):
+                cur.execute(
+                    "INSERT INTO renglon_comprobante "
+                    "(nro_comprobante, cod_vino, cantidad) VALUES (%s, %s, %s)",
+                    (nro_comprobante, cod_vino, cantidad),
+                )
+
+            return nro_comprobante
+
+
 def obtener_comprobante(conn: psycopg.Connection, nro_comprobante: int) -> dict | None:
     """Obtiene la cabecera y el detalle de renglones de un comprobante emitido.
 

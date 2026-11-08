@@ -109,6 +109,22 @@ def test_traducir_error_no_filtra_texto_original_no_mapeado():
     assert "privilegios insuficientes" not in cuerpo["error"]["mensaje"]
 
 
+def test_log_500_no_volca_texto_original(caplog):
+    """P2: el log del caso 500 no contiene el texto original de la base.
+
+    Solo se registran sqlstate, constraint y tabla (nunca datos personales
+    ni cadenas de conexión).
+    """
+    exc = pge.InsufficientPrivilege("Key (nro_documento)=(30111222) already exists.")
+    with caplog.at_level("ERROR", logger="bodegas.errors"):
+        traducir_error(exc, "POST")
+    assert caplog.records
+    texto_log = caplog.records[0].getMessage()
+    assert "30111222" not in texto_log
+    assert "already exists" not in texto_log
+    assert "sqlstate=42501" in texto_log
+
+
 # ---------------------------------------------------------------------------
 # Pruebas HTTP por SQLSTATE
 # ---------------------------------------------------------------------------

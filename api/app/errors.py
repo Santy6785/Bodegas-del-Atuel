@@ -49,10 +49,12 @@ _MENSAJE_08 = "No hay conexión con la base de datos."
 
 def _restriccion(exc: psycopg.Error) -> str | None:
     """Devuelve el nombre de la restricción violada, si el driver lo expone."""
-    try:
-        return exc.diag.constraint_name  # type: ignore[attr-defined]
-    except Exception:
-        return None
+    return getattr(exc.diag, "constraint_name", None)
+
+
+def _nombre_tabla(exc: psycopg.Error) -> str | None:
+    """Devuelve el nombre de la tabla afectada, si el driver lo expone."""
+    return getattr(exc.diag, "table_name", None)
 
 
 def traducir_error(exc: psycopg.Error, metodo: str) -> tuple[int, dict[str, Any], dict[str, str]]:
@@ -130,10 +132,13 @@ def traducir_error(exc: psycopg.Error, metodo: str) -> tuple[int, dict[str, Any]
         return status, cuerpo, headers
 
     # --- Cualquier otro error: 500 genérico y logueo del SQLSTATE -----------
+    # Nunca se loguea el texto completo de la excepción: puede contener
+    # valores de datos de la base (datos personales, CUITs, etc.).
     logger.error(
-        "Error de base de datos no mapeado: sqlstate=%s mensaje=%s",
+        "Error de base de datos no mapeado: sqlstate=%s constraint=%s tabla=%s",
         sqlstate,
-        str(exc),
+        _restriccion(exc),
+        _nombre_tabla(exc),
     )
     cuerpo = {
         "error": {

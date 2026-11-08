@@ -12,6 +12,9 @@ from fastapi.responses import JSONResponse
 from app.db.pool import close_pool, get_conn, open_pool
 from app.db.queries.salud import verificar_conexion
 from app.errors import register_exception_handlers, traducir_error
+from app.routers.comprobantes import router as comprobantes_router
+from app.routers.transferencias import router as transferencias_router
+from app.routers.vinos import router as vinos_router
 
 
 @asynccontextmanager
@@ -30,6 +33,10 @@ app = FastAPI(
 )
 
 register_exception_handlers(app)
+
+app.include_router(vinos_router)
+app.include_router(comprobantes_router)
+app.include_router(transferencias_router)
 
 # CORS: permitir conexiones desde el Frontend (puerto 5173 o 3000)
 cors_origins_raw = os.environ.get(

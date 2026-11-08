@@ -154,7 +154,43 @@ def _limpiar_datos_test(conn: psycopg.Connection) -> None:
     except Exception:
         pass
 
-    # 3. Limpiar catálogos auxiliares de prueba
+    # 3. Limpiar movimientos de prueba (comprobantes, transferencias, ingresos)
+    #    antes que las tablas padre, por las FK RESTRICT.
+    try:
+        with conn.transaction():
+            conn.execute(
+                """
+                DELETE FROM renglon_comprobante WHERE nro_comprobante IN (
+                    SELECT c.nro_comprobante FROM comprobante c
+                    JOIN cliente cl ON c.id_cliente = cl.id_cliente
+                    WHERE cl.apellido_razon_social LIKE 'TEST%' OR cl.nro_documento LIKE '99%'
+                );
+                DELETE FROM comprobante WHERE id_cliente IN (
+                    SELECT id_cliente FROM cliente WHERE apellido_razon_social LIKE 'TEST%' OR nro_documento LIKE '99%'
+                );
+                DELETE FROM renglon_transferencia WHERE nro_transferencia IN (
+                    SELECT t.nro_transferencia FROM transferencia t
+                    JOIN sala_venta s ON t.id_sala = s.id_sala
+                    WHERE s.calle LIKE 'TEST%'
+                );
+                DELETE FROM transferencia WHERE id_sala IN (
+                    SELECT id_sala FROM sala_venta WHERE calle LIKE 'TEST%'
+                );
+                DELETE FROM renglon_ingreso WHERE cod_ingreso IN (
+                    SELECT i.cod_ingreso FROM ingreso i
+                    JOIN transportista tr ON i.cod_transportista = tr.cod_transportista
+                    WHERE tr.razon_social LIKE 'TEST%' OR tr.cuit LIKE '999999999%'
+                );
+                DELETE FROM ingreso WHERE cod_transportista IN (
+                    SELECT cod_transportista FROM transportista WHERE razon_social LIKE 'TEST%' OR cuit LIKE '999999999%'
+                )
+                OR cuit_bodega LIKE '999999999%';
+                """
+            )
+    except Exception:
+        pass
+
+    # 4. Limpiar catálogos auxiliares de prueba
     try:
         with conn.transaction():
             conn.execute(
