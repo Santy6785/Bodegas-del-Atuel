@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     db_sslmode: str = "prefer"
     db_pool_min: int = 1
     db_pool_max: int = 10
+    db_pool_timeout: float = 10.0
+    db_pool_max_idle: float = 300.0
 
     # API
     api_port: int = 8000
