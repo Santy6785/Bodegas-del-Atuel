@@ -1,5 +1,7 @@
 # Mapa de Pantallas y Endpoints - Bodegas del Atuel (Etapa 7)
 
+> **Versión de referencia del contrato:** Revisado y contrastado contra `docs/api-contrato.md` (versión v0.6.2, commit `8ac52c6`).
+
 Este documento detalla el mapeo técnico entre las pantallas de la interfaz web cliente y los endpoints provistos (o requeridos) de la API REST del backend. Su propósito es definir con precisión qué datos necesita cada pantalla, qué envía, qué funciones de la capa `front/js/api/` los gestionan, los flujos de interacción y el tratamiento estricto de reglas de negocio y errores.
 
 ---
@@ -51,7 +53,7 @@ Permitir la consulta, búsqueda y filtrado paginado de los vinos del catálogo i
 | Listado general filtrado y paginado | `/vinos` | `GET` | **Query:** `page`, `page_size`, `tipo`, `id_cepa`, `cuit_bodega`, `anada`, `nombre` | Objeto `{ items, page, page_size, total }` con array de vinos y metadatos de paginación | `listarVinos(filtros)` en `vinos.js` | Enunciado / Bocetos (Issue #12) |
 | Detalle enológico completo (composición y maridaje) | `/vinos/{cod}` | `GET` | **Ruta:** `cod` (cod_vino) | Objeto con datos de vino, bodega, array `composicion: [{ id_cepa, nombre, tipo, porcentaje }]`, array `maridajes: [{ id_maridaje, nombre, temperatura_servicio }]` y objeto `stock` | `obtenerVino(cod)` en `vinos.js` | Enunciado / Bocetos (Issue #12) |
 | Catálogo de cepas (para combo de filtro) | `/cepas` | `GET` | Ninguno | Array de cepas `[{ id_cepa, nombre, tipo }]` | `listarCepas()` *(función sugerida)* | **PROPUESTO** (No listado en mínimos) |
-| Catálogo de bodegas (para combo de filtro) | `/bodegas` | `GET` | Ninguno | Array de bodegas `[{ cuit, razon_social, nombre_fantasia }]` | `listarBodegas()` *(función sugerida)* | **PROPUESTO** (No listado en mínimos) |
+| Catálogo de bodegas (para combo de filtro) | `/bodegas` | `GET` | Ninguno | Array de bodegas `[{ cuit, razon_social, domicilio }]` | `listarBodegas()` en `catalogos.js` | **PROPUESTO** (No listado en mínimos) |
 
 #### d) Flujo Paso a Paso
 1. Al cargar la pantalla, se solicitan en paralelo los datos de los selectores auxiliares (`GET /cepas` y `GET /bodegas`) y el primer lote de vinos (`GET /vinos?page=1&page_size=20`).
@@ -159,8 +161,8 @@ Registrar la emisión de un comprobante de venta de vinos a un cliente determina
 | Registrar y emitir el comprobante | `/comprobantes` | `POST` | **Body:** `{ id_cliente, id_sala, renglones: [{ cod_vino, cantidad }] }` | Comprobante emitido con `nro_comprobante` asignado | `crearComprobante(data)` en `comprobantes.js` | Enunciado / Bocetos |
 | Consultar detalle liquidado del comprobante | `/comprobantes/{nro}` | `GET` | **Ruta:** `nro` (nro_comprobante) | Objeto con cabecera (`subtotal`, `descuento`, `total`, `fecha`) y array `renglones` (`precio_unitario`, `descuento_pct`, `subtotal`) | `obtenerComprobante(nro)` en `comprobantes.js` | Enunciado / Bocetos |
 | Selector de clientes | `/clientes` | `GET` | Ninguno o `params` | Array de clientes `[{ id_cliente, tipo_cliente, apellido_razon_social, nombre }]` | `listarClientes(filtros)` en `clientes.js` | Enunciado |
-| Selector de salas de venta | `/salas` | `GET` | Ninguno | Array de salas `[{ id_sala, nombre, codigo_postal }]` | `listarSalas()` *(función sugerida)* | **PROPUESTO** (No listado en mínimos) |
-| Selector de vinos disponibles para venta | `/vinos` | `GET` | Ninguno o filtros | Array de vinos con `cod_vino`, `nombre`, `precio` | `listarVinos()` en `vinos.js` | Enunciado |
+| Selector de salas de venta | `/salas` | `GET` | Ninguno | Array de salas `[{ id_sala, calle, numero, dia_cierre, codigo_postal }]` (no existe campo "nombre"; la etiqueta del desplegable se arma con calle y número) | `listarSalas()` en `catalogos.js` | **PROPUESTO** (No listado en mínimos) |
+| Selector de vinos disponibles para venta | `/vinos` | `GET` | Ninguno o filtros | Objeto paginado `{ items, page, page_size, total }` (cada ítem con `cod_vino`, `nombre`, `precio`, etc.) | `listarVinos(filtros)` en `vinos.js` | Enunciado |
 
 #### d) Flujo Paso a Paso
 1. Al acceder a la pantalla, se cargan los selectores de Clientes (`GET /clientes`), Salas de venta (`GET /salas`) y el catálogo de Vinos disponibles (`GET /vinos`).
@@ -207,7 +209,7 @@ Administrar las solicitudes de reposición de botellas de vino desde el depósit
   - Formulario de solicitud: selector de Sala Solicitante, fecha de confección (automática/del sistema) e inputs para agregar vinos y cantidades.
   - Tabla de transferencias existentes con sus estados:
     - Columnas: Nro de transferencia (`nro`), Fecha (`fecha_confeccion`), Sala solicitante (`sala`), Vinos y cantidades agregadas, Estado actual (`estado`: `en_confeccion`, `terminado`, `procesado`), Acciones disponibles según el estado.
-  - Botones de acción dinámicos: *"Modificar"*, *"Borrar"*, *"Terminar Transferencia"* y *"Procesar Transferencia"*.
+  - Botones de acción dinámicos: *"Terminar Transferencia"* y *"Procesar Transferencia"* (la API no provee endpoints DELETE para transferencias ni renglones individuales).
 
 #### c) Tabla de Endpoints y Mapeo
 | Dato / Acción | Endpoint | Método | Parámetros | Campo en Respuesta | Función en `front/js/api/` | Origen |
@@ -216,8 +218,8 @@ Administrar las solicitudes de reposición de botellas de vino desde el depósit
 | Agregar renglón de vino a la transferencia | `/transferencias/{nro}/renglones` | `POST` | **Ruta:** `nro`<br>**Body:** `{ cod_vino, cantidad }` | Renglón creado y anexado | `agregarRenglonTransferencia(nro, data)` en `transferencias.js` | Enunciado / Bocetos |
 | Cambiar estado a terminado | `/transferencias/{nro}/terminar` | `POST` | **Ruta:** `nro` | Transferencia actualizada en estado `terminado` | `terminarTransferencia(nro)` en `transferencias.js` | Enunciado / Bocetos |
 | Procesar transferencia (impacta stock) | `/transferencias/{nro}/procesar` | `POST` | **Ruta:** `nro` | Confirmación y transferencia en estado `procesado` | `procesarTransferencia(nro)` en `transferencias.js` | Enunciado / Bocetos |
-| Listado de transferencias para la grilla | `/transferencias` | `GET` | **Query:** `id_sala`, `estado`, `page` | Array de transferencias con sus renglones y estados | `listarTransferencias(filtros)` *(función sugerida)* | **PROPUESTO** (Requerido por Boceto #4) |
-| Selector de salas solicitantes | `/salas` | `GET` | Ninguno | Array de salas de venta | `listarSalas()` *(función sugerida)* | **PROPUESTO** |
+| Listado de transferencias para la grilla | `/transferencias` | `GET` | **Query:** `id_sala`, `estado`, `page` | Array de transferencias con sus renglones y estados | `listarTransferencias(filtros)` en `transferencias.js` | **PROPUESTO** (Requerido por Boceto #4) |
+| Selector de salas solicitantes | `/salas` | `GET` | Ninguno | Array de salas `[{ id_sala, calle, numero, dia_cierre, codigo_postal }]` | `listarSalas()` en `catalogos.js` | **PROPUESTO** |
 
 #### d) Flujo Paso a Paso
 1. Se carga el listado de transferencias existentes (`GET /transferencias`) y el selector de salas (`GET /salas`).
@@ -231,7 +233,7 @@ Administrar las solicitudes de reposición de botellas de vino desde el depósit
 #### e) Matriz de Estados y Habilitación de Botones
 | Estado Actual | Botones Habilitados en Frontend | Endpoint Invocado | Estado Resultante | Reglas Aplicadas |
 |---|---|---|---|---|
-| `en_confeccion` | - **Agregar Renglón**<br>- **Quitar Renglón**<br>- **Terminar Transferencia**<br>- **Eliminar Transferencia** | - `POST /transferencias/{nro}/renglones`<br>- `DELETE /transferencias/{nro}/renglones/{cod}`<br>- `POST /transferencias/{nro}/terminar`<br>- `DELETE /transferencias/{nro}` | `terminado` (si se termina) o se mantiene `en_confeccion` | **RN-12**: Solo se permite alterar renglones si está en confección.<br>**RN-11**: Fecha inmutable. |
+| `en_confeccion` | - **Agregar Renglón**<br>- **Terminar Transferencia**<br>*(Quitar renglón y eliminar transferencia no disponibles en la API; no figuran en el contrato)* | - `POST /transferencias/{nro}/renglones`<br>- `POST /transferencias/{nro}/terminar` | `terminado` (si se termina) o se mantiene `en_confeccion` | **RN-12**: Solo se permite alterar renglones si está en confección.<br>**RN-11**: Fecha inmutable. |
 | `terminado` | - **Procesar Transferencia** *(Modificar y agregar renglones quedan estrictamente bloqueados)* | - `POST /transferencias/{nro}/procesar` | `procesado` | **RN-11**: Solo se puede procesar si está terminado.<br>**RN-12**: No se admiten cambios en renglones. |
 | `procesado` | *Ninguno* (Documento histórico cerrado e inmutable) | *Sin endpoints de modificación* | Estado final | **RN-11**: El movimiento ya impactó en las tablas de stock; no puede revertirse ni alterarse. |
 

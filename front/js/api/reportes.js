@@ -24,24 +24,30 @@ export async function topVinos(params = {}) {
 }
 
 /**
- * Obtiene el reporte de ventas agrupado por sala de venta en el último trimestre.
+ * Obtiene el reporte de ventas agrupado por sala de venta.
  * GET /reportes/ventas-por-sala
  *
- * @returns {Promise<any>} Totales de ventas por sala.
+ * @param {object} [params={}] - Parámetros de consulta opcionales.
+ * @param {string} [params.periodo] - Período relativo opcional (ej. "ultimo_trimestre").
+ * @param {string} [params.fecha_desde] - Fecha inicial en formato ISO (YYYY-MM-DD).
+ * @param {string} [params.fecha_hasta] - Fecha final en formato ISO (YYYY-MM-DD).
+ * @returns {Promise<any[]>} Totales de ventas por sala [{ id_sala, calle, numero, monto_total }].
  */
-export async function ventasPorSala() {
+export async function ventasPorSala(params = {}) {
+  const { periodo, fecha_desde, fecha_hasta } = params || {};
   return request("/reportes/ventas-por-sala", {
-    method: "GET"
+    method: "GET",
+    params: { periodo, fecha_desde, fecha_hasta }
   });
 }
 
 /**
- * Obtiene la lista de vinos que se encuentran sin stock disponible en una sala.
+ * Obtiene la lista de vinos que se encuentran sin stock disponible en una sala (o a nivel global si se omite).
  * GET /reportes/vinos-sin-stock
  *
- * @param {object} params - Parámetros de consulta obligatorios.
- * @param {number|string} params.id_sala - Identificador de la sala de venta (obligatorio, no sala_id).
- * @returns {Promise<any>} Vinos con stock en cero en la sala indicada.
+ * @param {object|number|string} [params={}] - Parámetros de consulta opcionales o id_sala numérico directo.
+ * @param {number|string} [params.id_sala] - Identificador opcional de la sala de venta.
+ * @returns {Promise<any[]>} Vinos con stock en cero [{ cod_vino, nombre, stock_deposito }].
  */
 export async function vinosSinStock(params = {}) {
   const id_sala = typeof params === "object" && params !== null ? params.id_sala : params;
