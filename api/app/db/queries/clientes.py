@@ -9,6 +9,7 @@ import psycopg
 
 from ._reglas import (
     rechazar_campos_calculados,
+    validar_fecha,
     validar_nombre_cliente,
     validar_rango_paginacion,
 )
