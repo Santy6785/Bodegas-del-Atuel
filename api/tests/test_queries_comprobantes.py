@@ -7,14 +7,6 @@ import pytest
 from app.db.queries.comprobantes import crear_comprobante, obtener_comprobante
 
 
-def _sp_crear_comprobante_existe(conn: psycopg.Connection) -> bool:
-    """Verifica si el procedimiento sp_crear_comprobante existe en PostgreSQL."""
-    row = conn.execute(
-        "SELECT 1 AS ok FROM pg_proc WHERE proname = 'sp_crear_comprobante'"
-    ).fetchone()
-    return row is not None
-
-
 @pytest.mark.integration
 def test_crear_comprobante_validacion_python_listas(db_conn: psycopg.Connection):
     """Valida que crear_comprobante verifique listas vacías o longitudes dispares antes de tocar la base."""
@@ -37,10 +29,6 @@ def test_obtener_comprobante_inexistente_retorna_none(db_conn: psycopg.Connectio
 @pytest.mark.integration
 def test_crear_comprobante_sin_stock_lanza_p0001(db_conn: psycopg.Connection):
     """Caso 8: Venta sin stock lanza P0001 y no deja comprobante ni renglones."""
-    if not _sp_crear_comprobante_existe(db_conn):
-        pytest.skip("sp_crear_comprobante no existe en 004")
-
-    # Si sp_crear_comprobante existiera:
     # crear_comprobante con cantidad mayor al stock disponible de la sala debe lanzar P0001 (RN-09)
     with pytest.raises(psycopg.errors.RaiseException) as exc_info:
         crear_comprobante(
@@ -56,10 +44,6 @@ def test_crear_comprobante_sin_stock_lanza_p0001(db_conn: psycopg.Connection):
 @pytest.mark.integration
 def test_crear_comprobante_exitoso_y_obtener(db_conn: psycopg.Connection):
     """Caso 9: Venta correcta con stock suficiente totaliza igual a fn_total_comprobante."""
-    if not _sp_crear_comprobante_existe(db_conn):
-        pytest.skip("sp_crear_comprobante no existe en 004")
-
-    # Si sp_crear_comprobante existiera:
     nro = crear_comprobante(
         db_conn,
         id_cliente=1,

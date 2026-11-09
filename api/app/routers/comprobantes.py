@@ -11,7 +11,7 @@ import psycopg
 
 from app.db.pool import get_conn
 from app.db.queries.comprobantes import (
-    crear_comprobante_directo,
+    crear_comprobante,
     obtener_comprobante,
 )
 from app.schemas.modelos import ComprobanteCreate
@@ -26,15 +26,14 @@ def crear_comprobante_endpoint(
 ) -> dict:
     """Registra una venta completa.
 
-    Delegar en crear_comprobante_directo: inserta la cabecera de
-    comprobante y un renglón por cada par (vino, cantidad). Los triggers
-    de la base aplican RN-09 (stock insuficiente -> P0001 -> 409),
+    Delegar en crear_comprobante: invoca CALL sp_crear_comprobante y los
+    triggers de la base aplican RN-09 (stock insuficiente -> P0001 -> 409),
     RN-06 (descuento) y RN-08 (subtotal/total).
 
     No se hace try/except: los errores de psycopg se propagan al
     handler global de errores.
     """
-    nro = crear_comprobante_directo(
+    nro = crear_comprobante(
         conn,
         id_cliente=datos.id_cliente,
         id_sala=datos.id_sala,
