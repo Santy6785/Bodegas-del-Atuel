@@ -200,6 +200,84 @@ $$;
 COMMENT ON PROCEDURE sp_procesar_transferencia(INTEGER) IS
     'RN-09, RN-11. Verifica stock del deposito, lo descuenta, suma a la sala y pasa la transferencia a procesado. Todo o nada.';
 
+-- ---------------------------------------------------------------------
+-- sp_crear_comprobante
+--
+-- Proposito : registrar una venta completa: cabecera de comprobante y
+--             un renglon por cada par (vino, cantidad). Los precios,
+--             descuentos, subtotales, totales y descuento de stock los
+--             calculan los triggers de la base (trg_renglon_comprobante
+--             antes/despues, RN-06, RN-08, RN-09).
+-- Parametros: p_id_cliente   INTEGER  cliente comprador.
+--             p_id_sala      INTEGER  sala de venta emisora.
+--             p_cod_vinos    INTEGER[] arreglo de codigos de vino.
+--             p_cantidades   INTEGER[] arreglo de cantidades de botellas.
+--             p_nro_comprobante INTEGER (INOUT) numero generado.
+-- Efectos   : inserta la cabecera con subtotal=descuento=total=0 (DEFAULT
+--             0) y un renglon por cada par. Los triggers completan
+--             precio_unitario, descuento_pct y subtotal por renglon, y
+--             recalculan la cabecera. Si un renglon no tiene stock en la
+--             sala, trg_renglon_comprobante_antes lanza P0001 (RN-09) y
+--             todo se revierte (todo o nada).
+-- Errores   : P0001 si los arreglos son NULL, vacios o de distinta
+--             longitud; P0001 si alguna cantidad <= 0 (CHECK de la tabla);
+--             23503 si cliente/sala/vino inexistente.
+-- Seguridad : INVOKER. Pendiente de decision sobre SECURITY DEFINER
+--             (contrato, seccion 6.16).
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE PROCEDURE sp_crear_comprobante(
+    p_id_cliente   INTEGER,
+    p_id_sala      INTEGER,
+    p_cod_vinos    INTEGER[],
+    p_cantidades   INTEGER[],
+    INOUT p_nro_comprobante INTEGER
+)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    i INTEGER;
+    n INTEGER;
+BEGIN
+    -- 1. Validar arreglos: no NULL, al menos un elemento, misma longitud.
+    IF p_cod_vinos IS NULL OR p_cantidades IS NULL THEN
+        RAISE EXCEPTION 'sp_crear_comprobante: los arreglos de vinos y cantidades no pueden ser NULL'
+            USING ERRCODE = 'raise_exception';
+    END IF;
+
+    n := array_length(p_cod_vinos, 1);
+    IF n IS NULL OR n = 0 THEN
+        RAISE EXCEPTION 'sp_crear_comprobante: se requiere al menos un vino y una cantidad'
+            USING ERRCODE = 'raise_exception';
+    END IF;
+
+    IF array_length(p_cantidades, 1) IS DISTINCT FROM n THEN
+        RAISE EXCEPTION 'sp_crear_comprobante: los arreglos de vinos y cantidades deben tener la misma longitud'
+            USING ERRCODE = 'raise_exception';
+    END IF;
+
+    -- 2. Insertar la cabecera. subtotal, descuento y total quedan en DEFAULT 0;
+    --    el trigger trg_renglon_comprobante_despues los recalcula.
+    INSERT INTO comprobante (id_cliente, id_sala)
+    VALUES (p_id_cliente, p_id_sala)
+    RETURNING nro_comprobante INTO p_nro_comprobante;
+
+    -- 3. Insertar los renglones uno por uno. El trigger BEFORE completa
+    --    precio_unitario, descuento_pct y subtotal; el AFTER descuenta el
+    --    stock de la sala y recalcula la cabecera. No se envian valores
+    --    calculados desde el procedimiento.
+    FOR i IN 1..n LOOP
+        INSERT INTO renglon_comprobante (nro_comprobante, cod_vino, cantidad)
+        VALUES (p_nro_comprobante, p_cod_vinos[i], p_cantidades[i]);
+    END LOOP;
+
+    -- No hay COMMIT ni ROLLBACK: se ejecuta dentro de la transaccion del
+    -- llamador, igual que sp_procesar_ingreso y sp_procesar_transferencia.
+END;
+$$;
+
+COMMENT ON PROCEDURE sp_crear_comprobante(INTEGER, INTEGER, INTEGER[], INTEGER[], INTEGER) IS
+    'RN-06, RN-08, RN-09. Crea una venta completa: cabecera y renglones con precios, descuentos y stock calculados por triggers. Todo o nada.';
+
 COMMIT;
 
 -- =====================================================================
