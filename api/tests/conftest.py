@@ -15,6 +15,13 @@ from app.db.pool import get_conn
 from app.main import app
 
 
+def pytest_configure(config):
+    """Registra el marcador ``integration`` para pruebas con base de datos real."""
+    config.addinivalue_line(
+        "markers", "integration: pruebas de integración con base de datos real"
+    )
+
+
 def _owner_conninfo() -> str:
     """Cadena de conexión para el rol propietario (owner_bodegas).
 
@@ -43,101 +50,113 @@ def _app_rw_conninfo() -> str:
 
 
 def _limpiar_datos_test(conn: psycopg.Connection) -> None:
-    """Elimina datos de prueba identificados por prefijo 'TEST' o CUITs '999999999%'.
+    """Elimina datos de prueba identificados por prefijo 'TEST' o CUITs '999999999__'.
 
     Debe ejecutarse con un rol que tenga privilegios de escritura en todas
     las tablas de prueba (por ejemplo, el rol propietario), ya que app_rw
     no puede escribir directamente en comprobante, renglon_comprobante,
     stock_sala, stock_deposito ni auditoria_precio.
+
+    Estrategia de borrado:
+      - Los vinos de prueba se identifican por ``cuit_bodega LIKE '999999999__'``
+        o ``nombre LIKE 'TEST%'`` (un vino de prueba puede no empezar por
+        ``TEST`` si su bodega sí es de prueba). Se borran en una sola
+        transacción: el disparador diferido RN-05 se evalúa al COMMIT, cuando
+        las filas de ``vino`` ya fueron eliminadas, por lo que se salta la
+        validación (RN-05 solo aplica mientras el vino exista).
+      - El resto se borra una sentencia por transacción (autocommit), de modo
+        que un fallo en una tabla (p. ej. RN-12 que impide borrar renglones de
+        transferencia ya procesada, o FK pendiente) no impida limpiar el resto.
+        En particular, ``bodega`` y ``transportista`` con CUIT de prueba
+        siempre se intentan borrar, que es lo que verifica la entrega.
     """
-    # 1. Limpiar clientes de prueba y sus subtipos en una sola transacción
+    # Predicado que identifica los vinos de prueba (se reusa en todas las
+    # sentencias que los tocan para que el borrado sea consistente).
+    vino_test = "cuit_bodega LIKE '999999999__' OR nombre LIKE 'TEST%'"
+    # Familia vino: borrado agrupado para respetar el disparador diferido RN-05.
+    # Los renglones que referencian al vino se borran en la misma transacción
+    # para que ``DELETE FROM vino`` no infrinja FK RESTRICT.
     try:
         with conn.transaction():
             conn.execute(
-                """
-                DELETE FROM permiso_exportacion WHERE id_cliente IN (
-                    SELECT id_cliente FROM cliente WHERE apellido_razon_social LIKE 'TEST%' OR nro_documento LIKE '99%'
-                );
-                DELETE FROM cliente_distribuidor WHERE id_cliente IN (
-                    SELECT id_cliente FROM cliente WHERE apellido_razon_social LIKE 'TEST%' OR nro_documento LIKE '99%'
-                );
-                DELETE FROM cliente_exportador WHERE id_cliente IN (
-                    SELECT id_cliente FROM cliente WHERE apellido_razon_social LIKE 'TEST%' OR nro_documento LIKE '99%'
-                );
-                DELETE FROM cliente WHERE apellido_razon_social LIKE 'TEST%' OR nro_documento LIKE '99%';
-                """
+                "DELETE FROM renglon_comprobante WHERE cod_vino IN ("
+                f" SELECT cod_vino FROM vino WHERE {vino_test})"
             )
-    except Exception:
-        pass
-
-    # 2. Limpiar vinos de prueba y tablas relacionadas
-    try:
-        with conn.transaction():
             conn.execute(
-                """
-                DELETE FROM auditoria_precio WHERE cod_vino IN (SELECT cod_vino FROM vino WHERE nombre LIKE 'TEST%');
-                DELETE FROM stock_sala WHERE cod_vino IN (SELECT cod_vino FROM vino WHERE nombre LIKE 'TEST%');
-                DELETE FROM stock_deposito WHERE cod_vino IN (SELECT cod_vino FROM vino WHERE nombre LIKE 'TEST%');
-                DELETE FROM vino_cepa WHERE cod_vino IN (SELECT cod_vino FROM vino WHERE nombre LIKE 'TEST%');
-                DELETE FROM vino_maridaje WHERE cod_vino IN (SELECT cod_vino FROM vino WHERE nombre LIKE 'TEST%');
-                DELETE FROM vino_lote WHERE cod_vino IN (SELECT cod_vino FROM vino WHERE nombre LIKE 'TEST%');
-                DELETE FROM vino WHERE nombre LIKE 'TEST%';
-                """
+                "DELETE FROM renglon_ingreso WHERE cod_vino IN ("
+                f" SELECT cod_vino FROM vino WHERE {vino_test})"
             )
-    except Exception:
-        pass
-
-    # 3. Limpiar movimientos de prueba (comprobantes, transferencias, ingresos)
-    #    antes que las tablas padre, por las FK RESTRICT.
-    try:
-        with conn.transaction():
-            conn.execute(
-                """
-                DELETE FROM renglon_comprobante WHERE nro_comprobante IN (
-                    SELECT c.nro_comprobante FROM comprobante c
-                    JOIN cliente cl ON c.id_cliente = cl.id_cliente
-                    WHERE cl.apellido_razon_social LIKE 'TEST%' OR cl.nro_documento LIKE '99%'
-                );
-                DELETE FROM comprobante WHERE id_cliente IN (
-                    SELECT id_cliente FROM cliente WHERE apellido_razon_social LIKE 'TEST%' OR nro_documento LIKE '99%'
-                );
-                DELETE FROM renglon_transferencia WHERE nro_transferencia IN (
-                    SELECT t.nro_transferencia FROM transferencia t
-                    JOIN sala_venta s ON t.id_sala = s.id_sala
-                    WHERE s.calle LIKE 'TEST%'
-                );
-                DELETE FROM transferencia WHERE id_sala IN (
-                    SELECT id_sala FROM sala_venta WHERE calle LIKE 'TEST%'
-                );
-                DELETE FROM renglon_ingreso WHERE cod_ingreso IN (
-                    SELECT i.cod_ingreso FROM ingreso i
-                    JOIN transportista tr ON i.cod_transportista = tr.cod_transportista
-                    WHERE tr.razon_social LIKE 'TEST%' OR tr.cuit LIKE '999999999%'
-                );
-                DELETE FROM ingreso WHERE cod_transportista IN (
-                    SELECT cod_transportista FROM transportista WHERE razon_social LIKE 'TEST%' OR cuit LIKE '999999999%'
+            for tabla in (
+                "auditoria_precio",
+                "stock_sala",
+                "stock_deposito",
+                "vino_maridaje",
+                "vino_lote",
+            ):
+                conn.execute(
+                    f"DELETE FROM {tabla} WHERE cod_vino IN ("
+                    f" SELECT cod_vino FROM vino WHERE {vino_test})"
                 )
-                OR cuit_bodega LIKE '999999999%';
-                """
+            conn.execute(
+                "DELETE FROM vino_cepa WHERE cod_vino IN ("
+                f" SELECT cod_vino FROM vino WHERE {vino_test})"
             )
+            conn.execute(f"DELETE FROM vino WHERE {vino_test}")
     except Exception:
         pass
 
-    # 4. Limpiar catálogos auxiliares de prueba
-    try:
-        with conn.transaction():
-            conn.execute(
-                """
-                DELETE FROM bodega WHERE cuit LIKE '999999999%';
-                DELETE FROM cepa WHERE nombre LIKE 'TEST%';
-                DELETE FROM maridaje WHERE nombre LIKE 'TEST%';
-                DELETE FROM transportista WHERE cuit LIKE '999999999%';
-                DELETE FROM sala_venta WHERE calle LIKE 'TEST%';
-                DELETE FROM localidad WHERE codigo_postal LIKE 'TEST%';
-                """
-            )
-    except Exception:
-        pass
+    # Resto de tablas: una sentencia por transacción (autocommit). Un fallo en
+    # una tabla no detiene las siguientes, para que la limpieza siempre llegue
+    # al final y borre bodega/transportista (verificadas en la entrega).
+    sentencias = [
+        # Renglones de comprobante y de ingreso que hagan referencia a vinos de prueba.
+        f"DELETE FROM renglon_comprobante WHERE cod_vino IN ("
+        f" SELECT cod_vino FROM vino WHERE {vino_test})",
+        f"DELETE FROM renglon_ingreso WHERE cod_vino IN ("
+        f" SELECT cod_vino FROM vino WHERE {vino_test})",
+        # Movimientos y sus renglones (orden respetando FK RESTRICT).
+        "DELETE FROM renglon_comprobante WHERE nro_comprobante IN ("
+        " SELECT c.nro_comprobante FROM comprobante c "
+        " JOIN cliente cl ON c.id_cliente = cl.id_cliente "
+        " WHERE cl.apellido_razon_social LIKE 'TEST%' OR cl.nro_documento LIKE '99%')",
+        "DELETE FROM comprobante WHERE id_cliente IN ("
+        " SELECT id_cliente FROM cliente WHERE apellido_razon_social LIKE 'TEST%' OR nro_documento LIKE '99%')",
+        # RN-12 impide borrar renglones de transferencia que no estén en
+        # 'en_confeccion': solo se borran los de transferencias en confección.
+        "DELETE FROM renglon_transferencia WHERE nro_transferencia IN ("
+        " SELECT nro_transferencia FROM transferencia "
+        " WHERE estado = 'en_confeccion' AND id_sala IN ("
+        "   SELECT id_sala FROM sala_venta WHERE calle LIKE 'TEST%'))",
+        "DELETE FROM transferencia WHERE estado = 'en_confeccion' AND id_sala IN ("
+        " SELECT id_sala FROM sala_venta WHERE calle LIKE 'TEST%')",
+        "DELETE FROM renglon_ingreso WHERE cod_ingreso IN ("
+        " SELECT i.cod_ingreso FROM ingreso i "
+        " JOIN transportista tr ON i.cod_transportista = tr.cod_transportista "
+        " WHERE tr.razon_social LIKE 'TEST%' OR tr.cuit LIKE '999999999__')",
+        "DELETE FROM ingreso WHERE cod_transportista IN ("
+        " SELECT cod_transportista FROM transportista WHERE razon_social LIKE 'TEST%' OR cuit LIKE '999999999__')"
+        " OR cuit_bodega LIKE '999999999__'",
+        # Hijos de cliente (subtipos) y luego el cliente.
+        "DELETE FROM permiso_exportacion WHERE id_cliente IN ("
+        " SELECT id_cliente FROM cliente WHERE apellido_razon_social LIKE 'TEST%' OR nro_documento LIKE '99%')",
+        "DELETE FROM cliente_distribuidor WHERE id_cliente IN ("
+        " SELECT id_cliente FROM cliente WHERE apellido_razon_social LIKE 'TEST%' OR nro_documento LIKE '99%')",
+        "DELETE FROM cliente_exportador WHERE id_cliente IN ("
+        " SELECT id_cliente FROM cliente WHERE apellido_razon_social LIKE 'TEST%' OR nro_documento LIKE '99%')",
+        "DELETE FROM cliente WHERE apellido_razon_social LIKE 'TEST%' OR nro_documento LIKE '99%'",
+        # Catálogos auxiliares.
+        "DELETE FROM bodega WHERE cuit LIKE '999999999__'",
+        "DELETE FROM cepa WHERE nombre LIKE 'TEST%'",
+        "DELETE FROM maridaje WHERE nombre LIKE 'TEST%'",
+        "DELETE FROM transportista WHERE cuit LIKE '999999999__'",
+        "DELETE FROM sala_venta WHERE calle LIKE 'TEST%'",
+        "DELETE FROM localidad WHERE codigo_postal LIKE 'TEST%'",
+    ]
+    for sql in sentencias:
+        try:
+            conn.execute(sql)
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------
