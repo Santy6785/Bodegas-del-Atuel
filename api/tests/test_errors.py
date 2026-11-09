@@ -6,9 +6,14 @@ genérico las traduzca según el contrato §1.2 y el TPI Etapa 6.
 
 Incluye una prueba de regresión contra GET /salud usando el cliente de
 conftest.py para asegurar que el handler de base inaccesible sigue vigente.
+
+También incluye pruebas contra la app real de app.main para verificar que
+los errores de conexión (OperationalError / PoolTimeout sin SQLSTATE) en
+endpoints de negocio respondan 503 con formato anidado.
 """
 
 from collections.abc import Generator
+from contextlib import asynccontextmanager
 
 import psycopg
 import psycopg.errors as pge
@@ -20,6 +25,7 @@ from fastapi.testclient import TestClient
 
 from app.errors import register_exception_handlers, traducir_error
 from app.db.pool import get_conn
+from app.main import app
 
 
 class FailConn:
@@ -246,7 +252,7 @@ def test_salud_regresion_503_base_inaccesible(client: TestClient):
 
 
 # ---------------------------------------------------------------------------
-# Parte A: errores de conexión en endpoints de negocio
+# Parte A: errores de conexión en endpoints de negocio (app mínima)
 # ---------------------------------------------------------------------------
 
 def _app_conexion() -> FastAPI:
@@ -297,11 +303,150 @@ def test_conexion_endpoint_negocio_formato_contrato(conexion_client: TestClient)
 
 
 def test_pool_timeout_endpoint_negocio_formato_contrato(conexion_client: TestClient):
-    """PoolTimeout en endpoint de negocio → formato del contrato (500, sin sqlstate)."""
+    """PoolTimeout en endpoint de negocio → 503 con formato del contrato (sin sqlstate).
+
+    PoolTimeout hereda de psycopg.OperationalError y no expone sqlstate,
+    por lo que traducir_error lo clasifica como error de conexión (503).
+    """
     resp = conexion_client.post("/pool-timeout")
-    assert resp.status_code == 500
+    assert resp.status_code == 503
     body = resp.json()
     assert set(body.keys()) == {"error"}
     assert set(body["error"].keys()) == {"sqlstate", "mensaje", "restriccion"}
     assert body["error"]["sqlstate"] is None
-    assert body["error"]["mensaje"] == "Error interno de la base de datos."
+    assert body["error"]["mensaje"] == "No hay conexión con la base de datos."
+    assert body["error"]["restriccion"] is None
+
+
+# ---------------------------------------------------------------------------
+# Parte B: errores de conexión en endpoints de negocio (app real)
+# ---------------------------------------------------------------------------
+
+class FailConnReal:
+    """Conexión falsa cuyo transaction() lanza psycopg.OperationalError.
+
+    Simula una caída de conexión (sin SQLSTATE del servidor) al iniciar
+    una transacción, que es lo que hace crear_vino al llamar a
+    ``conn.transaction()`` dentro de ``with conn.transaction()``.
+    """
+
+    def execute(self, query, params=None):
+        raise psycopg.OperationalError("conexión caída")
+
+    def cursor(self):
+        raise psycopg.OperationalError("conexión caída")
+
+    def transaction(self):
+        return _FailingTransactionReal()
+
+    def close(self):
+        pass
+
+
+class _FailingTransactionReal:
+    """Context manager que lanza OperationalError al entrar."""
+
+    def __enter__(self):
+        raise psycopg.OperationalError("conexión caída")
+
+    def __exit__(self, *args):
+        return False
+
+
+def _fake_fail_conn() -> Generator[FailConnReal, None, None]:
+    yield FailConnReal()
+
+
+@pytest.fixture()
+def real_app_client() -> TestClient:
+    """TestClient contra la app real de app.main con get_conn sobrescrito."""
+    original_lifespan = app.router.lifespan_context
+
+    @asynccontextmanager
+    async def _lifespan_vacio(_app):
+        yield
+
+    app.router.lifespan_context = _lifespan_vacio
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        app.router.lifespan_context = original_lifespan
+        app.dependency_overrides.clear()
+
+
+def test_post_vinos_operational_error_503(real_app_client: TestClient):
+    """POST /vinos con OperationalError sin SQLSTATE → 503, formato anidado.
+
+    Usa la app real de app.main con el handler registrado. El override de
+    get_conn devuelve una conexión cuyo transaction() lanza
+    psycopg.OperationalError("conexión caída") sin sqlstate.
+    """
+    app.dependency_overrides[get_conn] = _fake_fail_conn
+    try:
+        resp = real_app_client.post(
+            "/vinos",
+            json={
+                "nombre": "TEST Vino Error Conexión",
+                "tipo": "tinto",
+                "anada": 2021,
+                "volumen_ml": 750,
+                "graduacion": "14.00",
+                "precio": "10000.00",
+                "cuit_bodega": "99999999901",
+                "composicion": [{"id_cepa": 1, "porcentaje": "100.00"}],
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+    assert resp.status_code == 503, resp.text
+    body = resp.json()
+    assert set(body.keys()) == {"error"}
+    assert set(body["error"].keys()) == {"sqlstate", "mensaje", "restriccion"}
+    assert body["error"]["sqlstate"] is None
+    assert body["error"]["mensaje"] == "No hay conexión con la base de datos."
+    assert body["error"]["restriccion"] is None
+
+
+def test_post_vinos_pool_timeout_503(real_app_client: TestClient):
+    """POST /vinos con PoolTimeout → 503, formato anidado, sqlstate None.
+
+    PoolTimeout hereda de psycopg.OperationalError y no trae sqlstate.
+    """
+    app.dependency_overrides[get_conn] = _fake_fail_conn
+    try:
+        resp = real_app_client.post(
+            "/vinos",
+            json={
+                "nombre": "TEST Vino Pool Timeout",
+                "tipo": "tinto",
+                "anada": 2021,
+                "volumen_ml": 750,
+                "graduacion": "14.00",
+                "precio": "10000.00",
+                "cuit_bodega": "99999999902",
+                "composicion": [{"id_cepa": 1, "porcentaje": "100.00"}],
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+    assert resp.status_code == 503, resp.text
+    body = resp.json()
+    assert body["error"]["sqlstate"] is None
+    assert body["error"]["mensaje"] == "No hay conexión con la base de datos."
+    assert body["error"]["restriccion"] is None
+
+
+def test_salud_operational_error_sigue_cuerpo_propio(real_app_client: TestClient):
+    """GET /salud con OperationalError → 503 con cuerpo propio de base inaccesible.
+
+    El handler específico de /salud tiene prioridad y conserva su cuerpo:
+    {"estado": "error", "base_de_datos": "inaccesible"}.
+    """
+    app.dependency_overrides[get_conn] = _fake_fail_conn
+    try:
+        resp = real_app_client.get("/salud")
+    finally:
+        app.dependency_overrides.clear()
+    assert resp.status_code == 503
+    assert resp.json() == {"estado": "error", "base_de_datos": "inaccesible"}

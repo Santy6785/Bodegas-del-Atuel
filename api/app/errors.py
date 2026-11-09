@@ -77,6 +77,20 @@ def traducir_error(exc: psycopg.Error, metodo: str) -> tuple[int, dict[str, Any]
     sqlstate = exc.sqlstate or ""
     headers: dict[str, str] = {}
 
+    # --- Errores de conexión sin SQLSTATE del servidor -----------------------
+    # Un psycopg.OperationalError generado localmente por el cliente
+    # (caída de conexión, PoolTimeout) no trae SQLSTATE. Si el sqlstate está
+    # vacío o empieza con "08", responder 503 con mensaje de conexión.
+    if isinstance(exc, psycopg.OperationalError) and (not sqlstate or sqlstate.startswith("08")):
+        cuerpo = {
+            "error": {
+                "sqlstate": None if not sqlstate else sqlstate,
+                "mensaje": _MENSAJE_08,
+                "restriccion": None,
+            }
+        }
+        return 503, cuerpo, headers
+
     # --- Clase 08: errores de conexión -------------------------------------
     if sqlstate.startswith("08"):
         cuerpo = {
