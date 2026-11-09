@@ -13,12 +13,20 @@ export class ApiError extends Error {
    * @param {number} status - Código de estado HTTP (o 0 si ocurrió un error de red).
    * @param {string} message - Mensaje de error devuelto por la API tal cual o mensaje de fallo de conexión.
    * @param {any} [data=null] - Payload completo de la respuesta de error o null.
+   * @param {string|null} [sqlstate=null] - Código SQLSTATE de PostgreSQL o null si no aplica.
+   * @param {string|null} [restriccion=null] - Nombre de la restricción violada o null si no aplica.
    */
-  constructor(status, message, data = null) {
+  constructor(status, message, data = null, sqlstate = null, restriccion = null) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.data = data;
+    this.sqlstate =
+      sqlstate ??
+      (data && typeof data === "object" ? data.error?.sqlstate ?? null : null);
+    this.restriccion =
+      restriccion ??
+      (data && typeof data === "object" ? data.error?.restriccion ?? null : null);
   }
 }
 
@@ -108,39 +116,70 @@ export async function request(path, { method = "GET", params, body } = {}) {
 
   if (!response.ok) {
     let errorMessage = "";
+    let sqlstate = null;
+    let restriccion = null;
 
-    // Probar en el body los campos mensaje, message, detail, error
     if (parsedData && typeof parsedData === "object") {
-      const candidate =
-        parsedData.mensaje ??
-        parsedData.message ??
-        parsedData.detail ??
-        parsedData.error;
+      // 1) Formato oficial del contrato: {"error": {"sqlstate", "mensaje", "restriccion"}}
+      if (parsedData.error && typeof parsedData.error === "object") {
+        if (
+          typeof parsedData.error.mensaje === "string" &&
+          parsedData.error.mensaje.trim()
+        ) {
+          errorMessage = parsedData.error.mensaje.trim();
+        }
+        if (parsedData.error.sqlstate !== undefined && parsedData.error.sqlstate !== null) {
+          sqlstate = parsedData.error.sqlstate;
+        }
+        if (parsedData.error.restriccion !== undefined && parsedData.error.restriccion !== null) {
+          restriccion = parsedData.error.restriccion;
+        }
+      }
 
-      if (typeof candidate === "string" && candidate.trim()) {
-        errorMessage = candidate.trim();
-      } else if (Array.isArray(candidate)) {
-        errorMessage = candidate
-          .map((item) =>
-            typeof item === "string"
-              ? item
-              : item?.msg || item?.message || JSON.stringify(item)
-          )
-          .join(", ");
-      } else if (candidate && typeof candidate === "object") {
-        errorMessage =
-          candidate.msg || candidate.message || JSON.stringify(candidate);
+      // 2) Formatos alternativos en primer nivel (mensaje, message, detail, error como string)
+      if (!errorMessage) {
+        if (typeof parsedData.mensaje === "string" && parsedData.mensaje.trim()) {
+          errorMessage = parsedData.mensaje.trim();
+        } else if (typeof parsedData.message === "string" && parsedData.message.trim()) {
+          errorMessage = parsedData.message.trim();
+        } else if (typeof parsedData.detail === "string" && parsedData.detail.trim()) {
+          errorMessage = parsedData.detail.trim();
+        } else if (Array.isArray(parsedData.detail)) {
+          errorMessage = parsedData.detail
+            .map((item) =>
+              typeof item === "string"
+                ? item
+                : item?.msg || item?.message || JSON.stringify(item)
+            )
+            .join(", ");
+        } else if (parsedData.detail && typeof parsedData.detail === "object") {
+          errorMessage =
+            parsedData.detail.msg ||
+            parsedData.detail.message ||
+            JSON.stringify(parsedData.detail);
+        } else if (typeof parsedData.error === "string" && parsedData.error.trim()) {
+          errorMessage = parsedData.error.trim();
+        }
+      }
+
+      // 3) JSON.stringify solo como último recurso
+      if (!errorMessage) {
+        try {
+          errorMessage = JSON.stringify(parsedData);
+        } catch {
+          errorMessage = "";
+        }
       }
     } else if (typeof parsedData === "string" && parsedData.trim()) {
       errorMessage = parsedData.trim();
     }
 
-    // Si no se encontró ningún mensaje en el body
+    // 4) Si no se encontró ningún mensaje en el body
     if (!errorMessage) {
       errorMessage = `Error ${response.status}`;
     }
 
-    throw new ApiError(response.status, errorMessage, parsedData);
+    throw new ApiError(response.status, errorMessage, parsedData, sqlstate, restriccion);
   }
 
   return parsedData;

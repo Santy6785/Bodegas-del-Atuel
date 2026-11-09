@@ -11,4 +11,5 @@ export * from "./comprobantes.js";
 export * from "./transferencias.js";
 export * from "./ingresos.js";
 export * from "./reportes.js";
+export * from "./catalogos.js";
 export * from "./salud.js";
