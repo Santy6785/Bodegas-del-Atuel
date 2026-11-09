@@ -2,9 +2,10 @@
 -- 004_procedimientos.sql
 -- Bodegas del Atuel - Procedimientos transaccionales
 --
--- Contiene 2 procedimientos:
+-- Contiene 3 procedimientos:
 --   sp_procesar_ingreso(cod_ingreso)     RN-10, RN-12
 --   sp_procesar_transferencia(nro)       RN-09, RN-11, RN-12
+--   sp_crear_comprobante(...)            RN-06, RN-08, RN-09
 --
 -- Ambos hacen lo mismo, en este orden:
 --   1. Bloquean la cabecera con SELECT ... FOR UPDATE (nadie mas puede
@@ -45,8 +46,13 @@ BEGIN;
 -- Errores   : P0001 si el ingreso no existe, no esta 'terminado' o no
 --             tiene renglones.
 -- ---------------------------------------------------------------------
+-- Ejecuta con privilegios del propietario (owner_bodegas) para poder
+-- escribir en stock_deposito (tabla restringida: app_rw solo lee).
+-- SET search_path evita inyeccion mediante busqueda de objetos.
 CREATE OR REPLACE PROCEDURE sp_procesar_ingreso(p_cod_ingreso INTEGER)
 LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
 AS $$
 DECLARE
     v_estado estado_documento;
@@ -117,8 +123,13 @@ COMMENT ON PROCEDURE sp_procesar_ingreso(INTEGER) IS
 --   y se rechaza antes de modificar nada. El CHECK queda como red de
 --   seguridad.
 -- ---------------------------------------------------------------------
+-- Ejecuta con privilegios del propietario (owner_bodegas) para poder
+-- escribir en stock_deposito y stock_sala (tablas restringidas: app_rw
+-- solo lee). SET search_path evita inyeccion mediante busqueda de objetos.
 CREATE OR REPLACE PROCEDURE sp_procesar_transferencia(p_nro INTEGER)
 LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
 AS $$
 DECLARE
     v_estado    estado_documento;
@@ -222,8 +233,12 @@ COMMENT ON PROCEDURE sp_procesar_transferencia(INTEGER) IS
 -- Errores   : P0001 si los arreglos son NULL, vacios o de distinta
 --             longitud; P0001 si alguna cantidad <= 0 (CHECK de la tabla);
 --             23503 si cliente/sala/vino inexistente.
--- Seguridad : INVOKER. Pendiente de decision sobre SECURITY DEFINER
---             (contrato, seccion 6.16).
+-- Ejecuta con privilegios del propietario (owner_bodegas) para poder
+-- escribir en comprobante y renglon_comprobante (tablas restringidas:
+-- app_rw solo lee). La escritura directa de app_rw en estas tablas esta
+-- revocada (ver 007_roles.sql); solo el procedimiento puede modificarlas.
+-- SET search_path evita inyeccion mediante busqueda de objetos.
+-- Resuelve la decision pendiente de contrato seccion 6.16: SECURITY DEFINER.
 -- ---------------------------------------------------------------------
 CREATE OR REPLACE PROCEDURE sp_crear_comprobante(
     p_id_cliente   INTEGER,
@@ -233,6 +248,8 @@ CREATE OR REPLACE PROCEDURE sp_crear_comprobante(
     INOUT p_nro_comprobante INTEGER
 )
 LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
 AS $$
 DECLARE
     i INTEGER;

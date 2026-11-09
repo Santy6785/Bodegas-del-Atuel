@@ -62,6 +62,7 @@ BEGIN;
 CREATE OR REPLACE FUNCTION trg_renglon_comprobante_antes()
 RETURNS trigger
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_sala    INTEGER;
@@ -132,6 +133,7 @@ FOR EACH ROW EXECUTE FUNCTION trg_renglon_comprobante_antes();
 CREATE OR REPLACE FUNCTION trg_renglon_comprobante_despues()
 RETURNS trigger
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_sala INTEGER;
@@ -363,6 +365,7 @@ FOR EACH ROW EXECUTE FUNCTION trg_renglon_transferencia_confeccion();
 CREATE OR REPLACE FUNCTION trg_vino_auditoria_precio()
 RETURNS trigger
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 BEGIN
     INSERT INTO auditoria_precio (cod_vino, precio_anterior, precio_nuevo)
