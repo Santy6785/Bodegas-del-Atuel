@@ -39,8 +39,13 @@ def cliente_real():
 # Helpers de preparación de datos (usados por cada prueba de forma autónoma)
 # ---------------------------------------------------------------------------
 
-def _preparar_entorno_venta(conn: psycopg.Connection, sufijo: str) -> dict:
+def _preparar_entorno_venta(
+    conn: psycopg.Connection, db_owner_conn: psycopg.Connection, sufijo: str
+) -> dict:
     """Crea localidad, bodega, sala, cepa, vino, cliente y stock de sala.
+
+    Las inserciones en tablas de stock (restringidas para app_rw) se hacen
+    con la conexión de propietario (db_owner_conn). El resto usa conn (app_rw).
 
     Devuelve ids y claves para armar el request de venta.
     """
@@ -106,8 +111,9 @@ def _preparar_entorno_venta(conn: psycopg.Connection, sufijo: str) -> dict:
         (nombre_cliente, cuit, cp),
     ).fetchone()["id_cliente"]
 
-    # Stock de sala: 2 botellas (insuficiente para vender 5)
-    cur.execute(
+    # Stock de sala: 2 botellas (insuficiente para vender 5).
+    # stock_sala es de solo lectura para app_rw: se inserta con el propietario.
+    db_owner_conn.execute(
         """
         INSERT INTO stock_sala (id_sala, cod_vino, cantidad)
         VALUES (%s, %s, 2)
@@ -119,8 +125,13 @@ def _preparar_entorno_venta(conn: psycopg.Connection, sufijo: str) -> dict:
     return {"id_cliente": id_cliente, "id_sala": id_sala, "cod_vino": cod_vino}
 
 
-def _preparar_entorno_transferencia(conn: psycopg.Connection, sufijo: str) -> dict:
+def _preparar_entorno_transferencia(
+    conn: psycopg.Connection, db_owner_conn: psycopg.Connection, sufijo: str
+) -> dict:
     """Crea localidad, bodega, sala, vino, stock_deposito para transferencia.
+
+    Las inserciones en stock_deposito (restringido para app_rw) se hacen
+    con la conexión de propietario (db_owner_conn).
 
     Devuelve id_sala y cod_vino.
     """
@@ -173,8 +184,9 @@ def _preparar_entorno_transferencia(conn: psycopg.Connection, sufijo: str) -> di
             (cod_vino, id_cepa),
         )
 
-    # Stock de depósito suficiente
-    cur.execute(
+    # Stock de depósito suficiente.
+    # stock_deposito es de solo lectura para app_rw: se inserta con el propietario.
+    db_owner_conn.execute(
         """
         INSERT INTO stock_deposito (cod_vino, cantidad)
         VALUES (%s, 100)
@@ -191,13 +203,17 @@ def _preparar_entorno_transferencia(conn: psycopg.Connection, sufijo: str) -> di
 # ---------------------------------------------------------------------------
 
 @pytest.mark.integration
-def test_rn09_stock_insuficiente_venta(cliente_real: TestClient, db_conn_commit: psycopg.Connection):
+def test_rn09_stock_insuficiente_venta(
+    cliente_real: TestClient,
+    db_conn_commit: psycopg.Connection,
+    db_owner: psycopg.Connection,
+):
     """RN-09: Vender más que el stock de sala → 409, P0001, mensaje RN-09.
 
     No queda nada a medias: stock de sala sigue en 2 y no hay comprobante.
     """
     sufijo = "01"
-    datos = _preparar_entorno_venta(db_conn_commit, sufijo)
+    datos = _preparar_entorno_venta(db_conn_commit, db_owner, sufijo)
 
     resp = cliente_real.post(
         "/comprobantes",
@@ -231,10 +247,23 @@ def test_rn09_stock_insuficiente_venta(cliente_real: TestClient, db_conn_commit:
     )
     assert cur.fetchall() == []
 
+    # Verificar que no quedaron renglones huérfanos
+    cur.execute(
+        """
+        SELECT COUNT(*) AS n FROM renglon_comprobante rc
+        JOIN comprobante c ON c.nro_comprobante = rc.nro_comprobante
+        WHERE c.id_cliente = %s
+        """,
+        (datos["id_cliente"],),
+    )
+    assert cur.fetchone()["n"] == 0
+
 
 @pytest.mark.integration
 def test_rn09_stock_insuficiente_dos_renglones_atomicidad(
-    cliente_real: TestClient, db_conn_commit: psycopg.Connection
+    cliente_real: TestClient,
+    db_conn_commit: psycopg.Connection,
+    db_owner: psycopg.Connection,
 ):
     """RN-09: Dos renglones, el segundo sin stock → 409, P0001, RN-09, atomicidad.
 
@@ -316,12 +345,13 @@ def test_rn09_stock_insuficiente_dos_renglones_atomicidad(
         (f"TEST Cliente {sufijo}", cuit, cp),
     ).fetchone()["id_cliente"]
 
-    # Stock de sala: 10 del vino 1 (suficiente para 3), 2 del vino 2 (insuficiente para 5)
-    cur.execute(
+    # Stock de sala: 10 del vino 1 (suficiente para 3), 2 del vino 2 (insuficiente para 5).
+    # stock_sala es de solo lectura para app_rw: se inserta con el propietario.
+    db_owner.execute(
         "INSERT INTO stock_sala (id_sala, cod_vino, cantidad) VALUES (%s, %s, 10)",
         (id_sala, cod_vino_1),
     )
-    cur.execute(
+    db_owner.execute(
         "INSERT INTO stock_sala (id_sala, cod_vino, cantidad) VALUES (%s, %s, 2)",
         (id_sala, cod_vino_2),
     )
@@ -481,14 +511,16 @@ def test_rn15_precio_negativo(cliente_real: TestClient, db_conn_commit: psycopg.
 
 @pytest.mark.integration
 def test_rn11_procesar_transferencia_no_terminada(
-    cliente_real: TestClient, db_conn_commit: psycopg.Connection
+    cliente_real: TestClient,
+    db_conn_commit: psycopg.Connection,
+    db_owner: psycopg.Connection,
 ):
     """RN-11: Procesar transferencia en 'en_confeccion' → 409, P0001, mensaje RN-11.
 
-    El estado sigue en 'en_confeccion'.
+    El estado sigue en en_confeccion.
     """
     sufijo = "04"
-    datos = _preparar_entorno_transferencia(db_conn_commit, sufijo)
+    datos = _preparar_entorno_transferencia(db_conn_commit, db_owner, sufijo)
 
     # Crear transferencia (estado en_confeccion por defecto)
     resp = cliente_real.post(
