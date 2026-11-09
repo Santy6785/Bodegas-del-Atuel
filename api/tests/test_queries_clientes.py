@@ -115,7 +115,6 @@ def test_crear_cliente_exportador_con_permisos(db_conn_commit: psycopg.Connectio
         "tipo_cliente": "exportador",
         "exportador": {
             "pais_destino": "Brasil",
-            "porcentaje_descuento": Decimal("30.00"),
             "permisos": [
                 {
                     "codigo": "TEST-EXP-01",
@@ -132,13 +131,14 @@ def test_crear_cliente_exportador_con_permisos(db_conn_commit: psycopg.Connectio
     cliente = obtener_cliente(db_conn_commit, id_cliente)
     assert cliente is not None
     assert cliente["tipo_cliente"] == "exportador"
+    # descuento_pct proviene de fn_descuento_cliente (DEFAULT 30.00 en la base)
     assert cliente["descuento_pct"] == Decimal("30.00")
     assert "exportador" in cliente
     assert cliente["exportador"]["pais_destino"] == "Brasil"
     assert len(cliente["exportador"]["permisos"]) == 1
     assert cliente["exportador"]["permisos"][0]["codigo"] == "TEST-EXP-01"
 
-    # Actualizar datos del exportador
+    # Actualizar datos del exportador (sin campo calculado porcentaje_descuento)
     actualizar_cliente(
         db_conn_commit,
         id_cliente,
@@ -151,7 +151,6 @@ def test_crear_cliente_exportador_con_permisos(db_conn_commit: psycopg.Connectio
             "codigo_postal": "TEST5602",
             "exportador": {
                 "pais_destino": "Uruguay",
-                "porcentaje_descuento": Decimal("35.00"),
                 "permisos": [
                     {
                         "codigo": "TEST-EXP-02",
@@ -166,7 +165,8 @@ def test_crear_cliente_exportador_con_permisos(db_conn_commit: psycopg.Connectio
     act = obtener_cliente(db_conn_commit, id_cliente)
     assert act["apellido_razon_social"] == "TEST Exportadora Global Actualizada S.A."
     assert act["exportador"]["pais_destino"] == "Uruguay"
-    assert act["descuento_pct"] == Decimal("35.00")
+    # descuento_pct no se envió en la actualización: se mantiene el DEFAULT 30.00
+    assert act["descuento_pct"] == Decimal("30.00")
     assert act["exportador"]["permisos"][0]["codigo"] == "TEST-EXP-02"
 
     # Eliminar exportador directamente falla por restricción de FK en cliente_exportador
