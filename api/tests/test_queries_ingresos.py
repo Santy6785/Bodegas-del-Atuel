@@ -15,11 +15,13 @@ from app.db.queries.ingresos import (
 
 
 @pytest.mark.integration
-def test_ingreso_flujo_completo_impacta_deposito(db_conn: psycopg.Connection):
+def test_ingreso_flujo_completo_impacta_deposito(
+    db_conn_commit: psycopg.Connection, db_owner: psycopg.Connection
+):
     """Prueba flujo completo de ingreso: crear, agregar renglón, terminar y procesar."""
     # Preparamos transportista, bodega, cepa y vino con composición válida (RN-05)
-    with db_conn.transaction():
-        cur = db_conn.cursor()
+    with db_conn_commit.transaction():
+        cur = db_conn_commit.cursor()
         cur.execute(
             """
             INSERT INTO transportista (razon_social, cuit, email, telefono, domicilio)
@@ -48,14 +50,15 @@ def test_ingreso_flujo_completo_impacta_deposito(db_conn: psycopg.Connection):
             (cod_vino, id_cepa),
         )
 
-    cur = db_conn.cursor()
+    cur = db_conn_commit.cursor()
     cur.execute(
         "SELECT cod_transportista FROM transportista WHERE cuit = '99999999971'"
     )
     cod_trans = cur.fetchone()["cod_transportista"]
 
-    # Inicializamos stock en depósito en 10
-    cur.execute(
+    # Inicializamos stock en depósito en 10.
+    # stock_deposito es de solo lectura para app_rw: se inserta con el propietario.
+    db_owner.execute(
         """
         INSERT INTO stock_deposito (cod_vino, cantidad)
         VALUES (%s, 10)
@@ -66,7 +69,7 @@ def test_ingreso_flujo_completo_impacta_deposito(db_conn: psycopg.Connection):
 
     # 1. Crear ingreso en confección
     ingreso = crear_ingreso(
-        db_conn,
+        db_conn_commit,
         fecha=date(2026, 11, 1),
         cod_transportista=cod_trans,
         cuit_bodega="99999999972",
@@ -75,24 +78,25 @@ def test_ingreso_flujo_completo_impacta_deposito(db_conn: psycopg.Connection):
     assert ingreso["estado"] == "en_confeccion"
 
     # 2. Agregar renglón: 60 botellas
-    renglon = agregar_renglon_ingreso(db_conn, cod_ing, cod_vino, cantidad=60)
+    renglon = agregar_renglon_ingreso(db_conn_commit, cod_ing, cod_vino, cantidad=60)
     assert renglon["cantidad"] == 60
 
     # 3. Terminar ingreso
-    term = terminar_ingreso(db_conn, cod_ing)
+    term = terminar_ingreso(db_conn_commit, cod_ing)
     assert term is not None
     assert term["estado"] == "terminado"
 
     # 4. Procesar ingreso (sp_procesar_ingreso)
-    procesar_ingreso(db_conn, cod_ing)
+    procesar_ingreso(db_conn_commit, cod_ing)
 
     # Verificaciones:
     # Estado en procesado
-    ing_final = obtener_ingreso(db_conn, cod_ing)
+    ing_final = obtener_ingreso(db_conn_commit, cod_ing)
     assert ing_final["estado"] == "procesado"
     assert len(ing_final["renglones"]) == 1
 
     # Depósito incrementó en 60: 10 + 60 = 70 botellas
+    cur = db_conn_commit.cursor()
     cur.execute(
         "SELECT cantidad FROM stock_deposito WHERE cod_vino = %s", (cod_vino,)
     )

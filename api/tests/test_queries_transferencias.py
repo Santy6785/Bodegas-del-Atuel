@@ -14,11 +14,13 @@ from app.db.queries.transferencias import (
 
 
 @pytest.mark.integration
-def test_transferencia_flujo_completo_con_stock(db_conn: psycopg.Connection):
+def test_transferencia_flujo_completo_con_stock(
+    db_conn_commit: psycopg.Connection, db_owner: psycopg.Connection
+):
     """Caso 11: Crear, agregar renglón, terminar y procesar transferencia con stock en depósito."""
     # Preparamos sala, vino con composición válida (RN-05) y stock en depósito
-    with db_conn.transaction():
-        cur = db_conn.cursor()
+    with db_conn_commit.transaction():
+        cur = db_conn_commit.cursor()
         cur.execute(
             """
             INSERT INTO localidad (codigo_postal, nombre, provincia, encargado_regional)
@@ -50,14 +52,15 @@ def test_transferencia_flujo_completo_con_stock(db_conn: psycopg.Connection):
             (cod_vino, id_cepa),
         )
 
-    cur = db_conn.cursor()
+    cur = db_conn_commit.cursor()
     cur.execute(
         "SELECT id_sala FROM sala_venta WHERE calle = 'TEST Calle Sala Trf 1'"
     )
     id_sala = cur.fetchone()["id_sala"]
 
-    # Dotamos al depósito de stock suficiente (100 botellas)
-    cur.execute(
+    # Dotamos al depósito de stock suficiente (100 botellas).
+    # stock_deposito es de solo lectura para app_rw: se inserta con el propietario.
+    db_owner.execute(
         """
         INSERT INTO stock_deposito (cod_vino, cantidad)
         VALUES (%s, 100)
@@ -65,8 +68,9 @@ def test_transferencia_flujo_completo_con_stock(db_conn: psycopg.Connection):
         """,
         (cod_vino,),
     )
-    # Sala inicia con 0 botellas
-    cur.execute(
+    # Sala inicia con 0 botellas.
+    # stock_sala es de solo lectura para app_rw: se inserta con el propietario.
+    db_owner.execute(
         """
         INSERT INTO stock_sala (id_sala, cod_vino, cantidad)
         VALUES (%s, %s, 0)
@@ -76,32 +80,33 @@ def test_transferencia_flujo_completo_con_stock(db_conn: psycopg.Connection):
     )
 
     # 1. Crear transferencia (estado en_confeccion)
-    trf = crear_transferencia(db_conn, id_sala)
+    trf = crear_transferencia(db_conn_commit, id_sala)
     nro_trf = trf["nro_transferencia"]
     assert trf["estado"] == "en_confeccion"
     assert trf["id_sala"] == id_sala
 
     # 2. Agregar renglón: transferir 25 botellas
     renglon = agregar_renglon_transferencia(
-        db_conn, nro_trf, cod_vino, cantidad=25
+        db_conn_commit, nro_trf, cod_vino, cantidad=25
     )
     assert renglon["cantidad"] == 25
 
     # 3. Terminar transferencia (estado pasa a terminado)
-    term = terminar_transferencia(db_conn, nro_trf)
+    term = terminar_transferencia(db_conn_commit, nro_trf)
     assert term is not None
     assert term["estado"] == "terminado"
 
     # 4. Procesar transferencia con stock disponible
-    procesar_transferencia(db_conn, nro_trf)
+    procesar_transferencia(db_conn_commit, nro_trf)
 
     # Verificaciones:
     # Transferencia queda en 'procesado'
-    trf_final = obtener_transferencia(db_conn, nro_trf)
+    trf_final = obtener_transferencia(db_conn_commit, nro_trf)
     assert trf_final["estado"] == "procesado"
     assert len(trf_final["renglones"]) == 1
 
     # Stock depósito disminuyó: 100 - 25 = 75
+    cur = db_conn_commit.cursor()
     cur.execute(
         "SELECT cantidad FROM stock_deposito WHERE cod_vino = %s", (cod_vino,)
     )
@@ -113,12 +118,20 @@ def test_transferencia_flujo_completo_con_stock(db_conn: psycopg.Connection):
     )
     assert cur.fetchone()["stock"] == 25
 
+    # Stock sala aumentó: 0 + 25 = 25
+    cur.execute(
+        "SELECT fn_stock_sala(%s, %s) AS stock", (id_sala, cod_vino)
+    )
+    assert cur.fetchone()["stock"] == 25
+
 
 @pytest.mark.integration
-def test_transferencia_sin_stock_deposito_lanza_p0001(db_conn: psycopg.Connection):
+def test_transferencia_sin_stock_deposito_lanza_p0001(
+    db_conn_commit: psycopg.Connection, db_owner: psycopg.Connection
+):
     """Caso 12: Transferencia sin stock en depósito lanza P0001 y estado queda 'terminado'."""
-    with db_conn.transaction():
-        cur = db_conn.cursor()
+    with db_conn_commit.transaction():
+        cur = db_conn_commit.cursor()
         cur.execute(
             """
             INSERT INTO localidad (codigo_postal, nombre, provincia, encargado_regional)
@@ -150,14 +163,15 @@ def test_transferencia_sin_stock_deposito_lanza_p0001(db_conn: psycopg.Connectio
             (cod_vino, id_cepa),
         )
 
-    cur = db_conn.cursor()
+    cur = db_conn_commit.cursor()
     cur.execute(
         "SELECT id_sala FROM sala_venta WHERE calle = 'TEST Calle Sala Trf 2'"
     )
     id_sala = cur.fetchone()["id_sala"]
 
-    # Depósito tiene solo 5 botellas
-    cur.execute(
+    # Depósito tiene solo 5 botellas.
+    # stock_deposito es de solo lectura para app_rw: se inserta con el propietario.
+    db_owner.execute(
         """
         INSERT INTO stock_deposito (cod_vino, cantidad)
         VALUES (%s, 5)
@@ -167,21 +181,22 @@ def test_transferencia_sin_stock_deposito_lanza_p0001(db_conn: psycopg.Connectio
     )
 
     # Creamos transferencia y pedimos 50 botellas (mayor que el stock disponible)
-    trf = crear_transferencia(db_conn, id_sala)
+    trf = crear_transferencia(db_conn_commit, id_sala)
     nro_trf = trf["nro_transferencia"]
-    agregar_renglon_transferencia(db_conn, nro_trf, cod_vino, cantidad=50)
-    terminar_transferencia(db_conn, nro_trf)
+    agregar_renglon_transferencia(db_conn_commit, nro_trf, cod_vino, cantidad=50)
+    terminar_transferencia(db_conn_commit, nro_trf)
 
     # Al procesar debe fallar con P0001 por stock insuficiente en el depósito central
     with pytest.raises(psycopg.errors.RaiseException) as exc_info:
-        procesar_transferencia(db_conn, nro_trf)
+        procesar_transferencia(db_conn_commit, nro_trf)
     assert exc_info.value.sqlstate == "P0001"
     assert "RN-09" in str(exc_info.value)
 
     # El estado debe permanecer en 'terminado' y el stock de depósito inalterado (5 botellas)
-    trf_actual = obtener_transferencia(db_conn, nro_trf)
+    trf_actual = obtener_transferencia(db_conn_commit, nro_trf)
     assert trf_actual["estado"] == "terminado"
 
+    cur = db_conn_commit.cursor()
     cur.execute(
         "SELECT cantidad FROM stock_deposito WHERE cod_vino = %s", (cod_vino,)
     )
