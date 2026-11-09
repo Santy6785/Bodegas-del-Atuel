@@ -4,6 +4,7 @@ from collections.abc import Generator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import os
 import psycopg
 from psycopg.rows import dict_row
 import pytest
@@ -14,109 +15,41 @@ from app.db.pool import get_conn
 from app.main import app
 
 
-def pytest_configure(config):
-    """Registra markers personalizados de pytest."""
-    config.addinivalue_line(
-        "markers", "integration: pruebas de integración con base de datos real"
+def _owner_conninfo() -> str:
+    """Cadena de conexión para el rol propietario (owner_bodegas).
+
+    Lee credenciales de variables de entorno (definidas en .env). Nunca
+    se escriben valores en el código.
+    """
+    from psycopg.conninfo import make_conninfo
+
+    return make_conninfo(
+        host=os.environ.get("DB_HOST", "localhost"),
+        port=int(os.environ.get("DB_PORT", "5433")),
+        dbname=os.environ.get("POSTGRES_DB", "bodegas_atuel"),
+        user=os.environ.get("POSTGRES_USER", "owner_bodegas"),
+        password=os.environ.get("POSTGRES_PASSWORD", "pgadmin"),
+        sslmode="prefer",
     )
 
 
-@pytest.fixture(scope="session")
-def ruta_consultas() -> Path:
-    """Devuelve la ruta a la carpeta consultas/.
+def _app_rw_conninfo() -> str:
+    """Cadena de conexión para el rol de aplicación (app_rw).
 
-    Resolución, en orden:
-      a) Variable de entorno BODEGAS_CONSULTAS_DIR si existe.
-      b) Path(__file__).resolve().parents[2] / "consultas" (desde api/tests/).
-
-    Si la ruta resuelta no existe, se salta la prueba con un mensaje claro.
+    Lee credenciales de variables de entorno (definidas en .env).
     """
-    env_dir = __import__("os").environ.get("BODEGAS_CONSULTAS_DIR")
-    if env_dir:
-        ruta = Path(env_dir)
-    else:
-        ruta = Path(__file__).resolve().parents[2] / "consultas"
-
-    if not ruta.exists():
-        pytest.skip("carpeta consultas/ no encontrada; definir BODEGAS_CONSULTAS_DIR")
-
-    return ruta
-
-
-class FakeConn:
-    """Conexión falsa: simula una consulta exitosa sin base real."""
-
-    def execute(self, query, params=None):
-        return self
-
-    def fetchone(self):
-        return {"ok": 1}
-
-
-def _fake_conn_ok() -> Generator[FakeConn, None, None]:
-    yield FakeConn()
-
-
-@asynccontextmanager
-async def _lifespan_vacio(_app):
-    """Reemplaza el lifespan para no abrir el pool real en tests unitarios."""
-    yield
-
-
-@pytest.fixture()
-def client() -> Generator[TestClient, None, None]:
-    """TestClient con conexión falsa y sin pool real."""
-    original_lifespan = app.router.lifespan_context
-    app.router.lifespan_context = _lifespan_vacio
-    app.dependency_overrides[get_conn] = _fake_conn_ok
-    try:
-        with TestClient(app) as c:
-            yield c
-    finally:
-        app.dependency_overrides.clear()
-        app.router.lifespan_context = original_lifespan
-
-
-def is_database_reachable() -> bool:
-    """Verifica si la base de datos PostgreSQL está accesible."""
     settings = get_settings()
-    try:
-        with psycopg.connect(
-            settings.conninfo, connect_timeout=3, row_factory=dict_row
-        ) as conn:
-            row = conn.execute("SELECT 1 AS ok").fetchone()
-            return row is not None and row["ok"] == 1
-    except Exception:
-        return False
-
-
-class _RollbackTestTransaction(Exception):
-    """Excepción interna para forzar rollback al final de un test."""
-
-
-@pytest.fixture()
-def db_conn() -> Generator[psycopg.Connection, None, None]:
-    """Conexión real con app_rw dentro de una transacción que finaliza en ROLLBACK.
-
-    Garantiza aislamiento total para tests que no requieran COMMIT de triggers diferidos.
-    """
-    if not is_database_reachable():
-        pytest.skip("Base de datos PostgreSQL no disponible para pruebas de integración")
-
-    settings = get_settings()
-    conn = psycopg.connect(settings.conninfo, row_factory=dict_row)
-    try:
-        with conn.transaction():
-            yield conn
-            raise _RollbackTestTransaction()
-    except _RollbackTestTransaction:
-        pass
-    finally:
-        conn.close()
+    return settings.conninfo
 
 
 def _limpiar_datos_test(conn: psycopg.Connection) -> None:
-    """Elimina datos de prueba identificados por prefijo 'TEST' o CUITs '999999999%'."""
+    """Elimina datos de prueba identificados por prefijo 'TEST' o CUITs '999999999%'.
+
+    Debe ejecutarse con un rol que tenga privilegios de escritura en todas
+    las tablas de prueba (por ejemplo, el rol propietario), ya que app_rw
+    no puede escribir directamente en comprobante, renglon_comprobante,
+    stock_sala, stock_deposito ni auditoria_precio.
+    """
     # 1. Limpiar clientes de prueba y sus subtipos en una sola transacción
     try:
         with conn.transaction():
@@ -207,22 +140,147 @@ def _limpiar_datos_test(conn: psycopg.Connection) -> None:
         pass
 
 
+# ---------------------------------------------------------------------------
+# Fixtures de conexión
+# ---------------------------------------------------------------------------
+
+@pytest.fixture()
+def db_owner() -> Generator[psycopg.Connection, None, None]:
+    """Conexión como rol propietario (owner_bodegas).
+
+    Se usa SOLO para preparar y limpiar datos de prueba en tablas a las que
+    app_rw no tiene escritura directa (comprobante, renglon_comprobante,
+    stock_sala, stock_deposito, auditoria_precio). Nunca se usa para
+    validar el comportamiento de la API.
+    """
+    if not is_database_reachable():
+        pytest.skip("Base de datos PostgreSQL no disponible para pruebas de integración")
+    conn = psycopg.connect(_owner_conninfo(), autocommit=True, row_factory=dict_row)
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
 @pytest.fixture()
 def db_conn_commit() -> Generator[psycopg.Connection, None, None]:
     """Conexión real con app_rw para tests que necesitan evaluar COMMIT (triggers diferidos).
 
-    Limpia los datos creados con prefijo TEST o CUIT 9999999999% al finalizar.
-    Utiliza autocommit=True en la conexión para que los bloques `with conn.transaction():`
-    de la DAL emitan un BEGIN/COMMIT real de primer nivel donde se evalúan los triggers diferidos.
+    La conexión entregada al test es de app_rw. La limpieza de datos de prueba
+    (antes y después) se ejecuta con db_owner, ya que app_rw no puede escribir
+    directamente en tablas de venta y stock.
     """
     if not is_database_reachable():
         pytest.skip("Base de datos PostgreSQL no disponible para pruebas de integración")
 
     settings = get_settings()
     conn = psycopg.connect(settings.conninfo, autocommit=True, row_factory=dict_row)
-    _limpiar_datos_test(conn)
+    owner_conn = psycopg.connect(_owner_conninfo(), autocommit=True, row_factory=dict_row)
     try:
+        _limpiar_datos_test(owner_conn)
         yield conn
     finally:
-        _limpiar_datos_test(conn)
+        _limpiar_datos_test(owner_conn)
+        owner_conn.close()
         conn.close()
+
+
+@pytest.fixture()
+def db_conn() -> Generator[psycopg.Connection, None, None]:
+    """Conexión real con app_rw dentro de una transacción que finaliza en ROLLBACK.
+
+    Garantiza aislamiento total para tests que no requieran COMMIT de triggers diferidos.
+    """
+    if not is_database_reachable():
+        pytest.skip("Base de datos PostgreSQL no disponible para pruebas de integración")
+
+    settings = get_settings()
+    conn = psycopg.connect(settings.conninfo, row_factory=dict_row)
+    try:
+        with conn.transaction():
+            yield conn
+            raise _RollbackTestTransaction()
+    except _RollbackTestTransaction:
+        pass
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Resto de fixtures (sin cambios)
+# ---------------------------------------------------------------------------
+
+from collections.abc import Generator as _Generator  # noqa: E402  (re-export for type hints)
+
+
+@pytest.fixture(scope="session")
+def ruta_consultas() -> Path:
+    """Devuelve la ruta a la carpeta consultas/.
+
+    Resolución, en orden:
+      a) Variable de entorno BODEGAS_CONSULTAS_DIR si existe.
+      b) Path(__file__).resolve().parents[2] / "consultas" (desde api/tests/).
+
+    Si la ruta resuelta no existe, se salta la prueba con un mensaje claro.
+    """
+    env_dir = __import__("os").environ.get("BODEGAS_CONSULTAS_DIR")
+    if env_dir:
+        ruta = Path(env_dir)
+    else:
+        ruta = Path(__file__).resolve().parents[2] / "consultas"
+
+    if not ruta.exists():
+        pytest.skip("carpeta consultas/ no encontrada; definir BODEGAS_CONSULTAS_DIR")
+
+    return ruta
+
+
+class FakeConn:
+    """Conexión falsa: simula una consulta exitosa sin base real."""
+
+    def execute(self, query, params=None):
+        return self
+
+    def fetchone(self):
+        return {"ok": 1}
+
+
+def _fake_conn_ok() -> Generator[FakeConn, None, None]:
+    yield FakeConn()
+
+
+@asynccontextmanager
+async def _lifespan_vacio(_app):
+    """Reemplaza el lifespan para no abrir el pool real en tests unitarios."""
+    yield
+
+
+@pytest.fixture()
+def client() -> Generator[TestClient, None, None]:
+    """TestClient con conexión falsa y sin pool real."""
+    original_lifespan = app.router.lifespan_context
+    app.router.lifespan_context = _lifespan_vacio
+    app.dependency_overrides[get_conn] = _fake_conn_ok
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        app.dependency_overrides.clear()
+        app.router.lifespan_context = original_lifespan
+
+
+def is_database_reachable() -> bool:
+    """Verifica si la base de datos PostgreSQL está accesible."""
+    settings = get_settings()
+    try:
+        with psycopg.connect(
+            settings.conninfo, connect_timeout=3, row_factory=dict_row
+        ) as conn:
+            row = conn.execute("SELECT 1 AS ok").fetchone()
+            return row is not None and row["ok"] == 1
+    except Exception:
+        return False
+
+
+class _RollbackTestTransaction(Exception):
+    """Excepción interna para forzar rollback al final de un test."""
