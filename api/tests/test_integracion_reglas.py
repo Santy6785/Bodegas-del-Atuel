@@ -232,6 +232,135 @@ def test_rn09_stock_insuficiente_venta(cliente_real: TestClient, db_conn_commit:
     assert cur.fetchall() == []
 
 
+@pytest.mark.integration
+def test_rn09_stock_insuficiente_dos_renglones_atomicidad(
+    cliente_real: TestClient, db_conn_commit: psycopg.Connection
+):
+    """RN-09: Dos renglones, el segundo sin stock → 409, P0001, RN-09, atomicidad.
+
+    El renglón primero tiene stock suficiente pero el segundo no; la venta
+    completa se rechaza y no queda ni comprobante ni renglones ni se descontó
+    stock del primero (todo o nada).
+    """
+    sufijo = "07"
+    cp = f"TEST{sufijo}"
+    cuit = f"999999999{sufijo.zfill(2)}"
+    nombre_localidad = f"Localidad Test {sufijo}"
+    nombre_bodega = f"TEST Bodega {sufijo}"
+    nombre_cepas = f"TEST Cepa {sufijo}"
+    calle = f"TEST Calle {sufijo}"
+
+    db_conn_commit.execute(
+        "INSERT INTO localidad (codigo_postal, nombre, provincia, encargado_regional) "
+        "VALUES (%s, %s, 'Mendoza', 'Encargado') ON CONFLICT DO NOTHING",
+        (cp, nombre_localidad),
+    )
+    db_conn_commit.execute(
+        "INSERT INTO bodega (cuit, razon_social, domicilio) "
+        "VALUES (%s, %s, 'Ruta Test') ON CONFLICT DO NOTHING",
+        (cuit, nombre_bodega),
+    )
+    db_conn_commit.execute(
+        "INSERT INTO sala_venta (calle, numero, dia_cierre, codigo_postal) "
+        "VALUES (%s, '1', 'lunes', %s) ON CONFLICT DO NOTHING",
+        (calle, cp),
+    )
+    db_conn_commit.execute(
+        "INSERT INTO cepa (nombre, tipo) VALUES (%s, 'tinta') ON CONFLICT DO NOTHING",
+        (nombre_cepas,),
+    )
+
+    cur = db_conn_commit.cursor()
+    cur.execute("SELECT id_sala FROM sala_venta WHERE calle = %s", (calle,))
+    id_sala = cur.fetchone()["id_sala"]
+    cur.execute("SELECT id_cepa FROM cepa WHERE nombre = %s", (nombre_cepas,))
+    id_cepa = cur.fetchone()["id_cepa"]
+
+    # Dos vinos con composición 100 % cada uno
+    with db_conn_commit.transaction():
+        cod_vino_1 = cur.execute(
+            """
+            INSERT INTO vino (nombre, tipo, anada, volumen_ml, graduacion, precio, cuit_bodega)
+            VALUES (%s, 'tinto', 2021, 750, 14.0, 10000.00, %s)
+            RETURNING cod_vino;
+            """,
+            (f"TEST Vino Atomic 1 {sufijo}", cuit),
+        ).fetchone()["cod_vino"]
+        cur.execute(
+            "INSERT INTO vino_cepa (cod_vino, id_cepa, porcentaje) VALUES (%s, %s, 100)",
+            (cod_vino_1, id_cepa),
+        )
+
+        cod_vino_2 = cur.execute(
+            """
+            INSERT INTO vino (nombre, tipo, anada, volumen_ml, graduacion, precio, cuit_bodega)
+            VALUES (%s, 'tinto', 2021, 750, 14.0, 10000.00, %s)
+            RETURNING cod_vino;
+            """,
+            (f"TEST Vino Atomic 2 {sufijo}", cuit),
+        ).fetchone()["cod_vino"]
+        cur.execute(
+            "INSERT INTO vino_cepa (cod_vino, id_cepa, porcentaje) VALUES (%s, %s, 100)",
+            (cod_vino_2, id_cepa),
+        )
+
+    # Cliente
+    id_cliente = cur.execute(
+        """
+        INSERT INTO cliente (apellido_razon_social, nombre, tipo_documento,
+                             nro_documento, direccion, codigo_postal,
+                             fecha_alta, tipo_cliente)
+        VALUES (%s, 'TEST Cliente', 'CUIT', %s, 'Dir Test', %s, CURRENT_DATE, 'socio')
+        RETURNING id_cliente;
+        """,
+        (f"TEST Cliente {sufijo}", cuit, cp),
+    ).fetchone()["id_cliente"]
+
+    # Stock de sala: 10 del vino 1 (suficiente para 3), 2 del vino 2 (insuficiente para 5)
+    cur.execute(
+        "INSERT INTO stock_sala (id_sala, cod_vino, cantidad) VALUES (%s, %s, 10)",
+        (id_sala, cod_vino_1),
+    )
+    cur.execute(
+        "INSERT INTO stock_sala (id_sala, cod_vino, cantidad) VALUES (%s, %s, 2)",
+        (id_sala, cod_vino_2),
+    )
+
+    resp = cliente_real.post(
+        "/comprobantes",
+        json={
+            "id_cliente": id_cliente,
+            "id_sala": id_sala,
+            "cod_vinos": [cod_vino_1, cod_vino_2],
+            "cantidades": [3, 5],  # el segundo no tiene stock (solo hay 2)
+        },
+    )
+
+    assert resp.status_code == 409, resp.text
+    body = resp.json()
+    assert body["error"]["sqlstate"] == "P0001"
+    assert "RN-09" in body["error"]["mensaje"], body["error"]["mensaje"]
+
+    # Atomicidad: stock de ambos vinos sin cambios
+    cur.execute(
+        "SELECT cantidad FROM stock_sala WHERE id_sala = %s AND cod_vino = %s",
+        (id_sala, cod_vino_1),
+    )
+    assert cur.fetchone()["cantidad"] == 10
+    cur.execute(
+        "SELECT cantidad FROM stock_sala WHERE id_sala = %s AND cod_vino = %s",
+        (id_sala, cod_vino_2),
+    )
+    assert cur.fetchone()["cantidad"] == 2
+
+    # No quedó comprobante ni renglones
+    cur.execute(
+        "SELECT nro_comprobante FROM comprobante WHERE id_cliente = %s",
+        (id_cliente,),
+    )
+    assert cur.fetchall() == []
+
+
 # ---------------------------------------------------------------------------
 # Caso 2: RN-01 / RN-15 Precio no positivo (POST /vinos)
 # ---------------------------------------------------------------------------

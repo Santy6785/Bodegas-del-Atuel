@@ -23,7 +23,7 @@ class VinoCreate(BaseModel):
     anada: int = Field(ge=1800, le=2100)
     volumen_ml: int = Field(gt=0)
     graduacion: Decimal = Field(ge=0, le=100)
-    precio: Decimal
+    precio: Decimal  # RN-01/RN-15: precio > 0 lo aplica el CHECK de vino (23514 -> 422); el modelo no duplica la regla.
     cuit_bodega: str = Field(min_length=11, max_length=11)
     composicion: list[CepaVino] = Field(min_length=1)
     maridajes: list[int] = Field(default_factory=list)
