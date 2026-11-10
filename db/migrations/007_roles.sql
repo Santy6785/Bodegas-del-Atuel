@@ -94,11 +94,48 @@ GRANT ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA public TO CURRENT_USER;
 -- =====================================================================
 -- Puede consultar y manipular datos, avanzar secuencias para IDs y
 -- ejecutar funciones y procedimientos. No puede alterar estructura (DDL).
+-- No tiene escritura directa en tablas de venta y stock (comprobante,
+-- renglon_comprobante, stock_sala, stock_deposito, auditoria_precio):
+-- esa escritura la hacen procedimientos y triggers SECURITY DEFINER
+-- (ver 004_procedimientos.sql y 005_triggers.sql).
 
 GRANT USAGE ON SCHEMA public TO app_rw;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_rw;
+
+-- Revocar todo privilegio previo sobre tablas (el GRANT ON ALL TABLES
+-- anterior concedía escritura directa en tablas restringidas).
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM app_rw;
+
+-- Tablas que la API administra directamente por CRUD: escritura permitida.
+-- Incluye catálogos, maestros y movimientos que la API lee y escribe
+-- a través de los endpoints REST.
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
+    vino, vino_cepa, vino_maridaje,
+    cliente, cliente_distribuidor, cliente_exportador, permiso_exportacion,
+    ingreso, renglon_ingreso,
+    transferencia, renglon_transferencia,
+    departamento, finca, parcela, lote_uva, analisis_calidad,
+    bodega, cepa, maridaje, transportista, transportista_localidad,
+    sala_venta, localidad, empleado
+TO app_rw;
+
+-- Tablas escritas solo por procedimientos o triggers SECURITY DEFINER.
+-- app_rw solo puede leerlas: nunca escribir directamente.
+-- comprobante y renglon_comprobante: escritos por sp_crear_comprobante.
+-- stock_sala y stock_deposito: escritos por sp_procesar_* y triggers.
+-- auditoria_precio: escrito por trg_vino_auditoria_precio.
+GRANT SELECT ON TABLE
+    comprobante, renglon_comprobante,
+    stock_sala, stock_deposito,
+    auditoria_precio, vino_lote
+TO app_rw;
+
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_rw;
 GRANT EXECUTE ON ALL ROUTINES IN SCHEMA public TO app_rw;
+
+
+-- Vistas materializadas no quedan cubiertas por ON ALL TABLES.
+GRANT SELECT ON vw_ventas_mensuales_sala TO app_rw;
+GRANT SELECT ON vw_stock_total_vino TO app_rw;
 
 
 -- =====================================================================
@@ -109,6 +146,7 @@ GRANT EXECUTE ON ALL ROUTINES IN SCHEMA public TO app_rw;
 
 GRANT USAGE ON SCHEMA public TO reportes_ro;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO reportes_ro;
+GRANT SELECT ON vw_ventas_mensuales_sala TO reportes_ro;
 GRANT EXECUTE ON ALL ROUTINES IN SCHEMA public TO reportes_ro;
 
 
@@ -119,7 +157,7 @@ GRANT EXECUTE ON ALL ROUTINES IN SCHEMA public TO reportes_ro;
 -- el propietario hereden automáticamente estos mismos privilegios mínimos.
 
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
-    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_rw;
+    GRANT SELECT ON TABLES TO app_rw;
 
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
     GRANT USAGE, SELECT ON SEQUENCES TO app_rw;

@@ -279,8 +279,9 @@ ALTER TABLE cliente_exportador
     ALTER COLUMN porcentaje_descuento SET DEFAULT 30.00;
 
 ALTER TABLE cliente_exportador
+    DROP CONSTRAINT IF EXISTS ck_cliente_exportador_descuento,
     ADD CONSTRAINT ck_cliente_exportador_descuento
-    CHECK (porcentaje_descuento BETWEEN 0 AND 100);
+    CHECK (porcentaje_descuento IN (30.00, 35.00));
 
 -- Entidad debil de cliente_exportador.
 ALTER TABLE permiso_exportacion

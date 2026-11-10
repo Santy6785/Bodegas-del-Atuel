@@ -1,4 +1,1 @@
-UPDATE cliente_exportador e
-   SET porcentaje_descuento = 35
- WHERE (SELECT count(*) FROM permiso_exportacion p
-         WHERE p.id_cliente = e.id_cliente) > 3;
+-- U6 reformulada el 2026-11-08: la consigna original de subir el descuento al 35% se cambió a una consulta de lectura (U6-R). La lógica de descuento ahora proviene de la función fn_descuento_cliente (ver decisiones D1 y D2).

@@ -2,28 +2,71 @@
 # .gitignore - Bodegas del Atuel
 # =====================================================================
 
-# Variables de entorno (NUNCA subir al repositorio; compose lee de .env)
-.env
+# ---------------------------------------------------------------------
+# Variables de entorno y secretos (NUNCA subir al repositorio)
+# ---------------------------------------------------------------------
+*.env
+.env.*
 .env.local
-.env.*.local
+.env
 !.env.example
 
+# ---------------------------------------------------------------------
+# Claves privadas, certificados y credenciales de proveedores
+# ---------------------------------------------------------------------
+*.pem
+*.key
+*.crt
+*.p12
+*.tfvars
+credentials.json
+service-account*.json
+client_secret*.json
+
+# ---------------------------------------------------------------------
 # Copias de seguridad generadas localmente
+# ---------------------------------------------------------------------
 backups/
 
-# Dependencias (según el stack que se elija)
-node_modules/
+# ---------------------------------------------------------------------
+# Python (entornos virtuales, caches y cobertura de tests)
+# ---------------------------------------------------------------------
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*$py.class
 .venv/
 venv/
+env/
 .tox/
 .pytest_cache/
 .coverage
+htmlcov/
+
+# ---------------------------------------------------------------------
+# Frontend y Node.js
+# ---------------------------------------------------------------------
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ---------------------------------------------------------------------
+# Logs de ejecución
+# ---------------------------------------------------------------------
 *.log
 
-# Sistema operativo
+# ---------------------------------------------------------------------
+# Editores y entornos de desarrollo (IDE)
+# ---------------------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ---------------------------------------------------------------------
+# Archivos específicos de sistemas operativos
+# ---------------------------------------------------------------------
 .DS_Store
 Thumbs.db
+desktop.ini

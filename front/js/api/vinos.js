@@ -9,18 +9,19 @@ import { request } from "./client.js";
  * GET /vinos
  *
  * @param {object} [filtros={}] - Filtros de búsqueda y paginación.
- * @param {string} [filtros.tipo] - Tipo de vino (ej. tinto, blanco, rosado, espumoso).
- * @param {string|number} [filtros.cepa] - Identificador o nombre de la cepa.
- * @param {string} [filtros.bodega] - CUIT o nombre de la bodega productora.
+ * @param {string} [filtros.tipo] - Tipo de vino (ej. tinto, blanco, rosado, espumante).
+ * @param {number} [filtros.id_cepa] - ID numérico de la cepa.
+ * @param {string} [filtros.cuit_bodega] - CUIT de 11 dígitos de la bodega productora.
  * @param {number} [filtros.anada] - Año de cosecha / añada.
+ * @param {string} [filtros.nombre] - Búsqueda parcial por nombre comercial.
  * @param {number} [filtros.page] - Número de página.
- * @param {number} [filtros.pageSize] - Cantidad de registros por página.
+ * @param {number} [filtros.page_size] - Cantidad de registros por página.
  * @returns {Promise<any>} Listado de vinos devuelto por la API.
  */
-export async function listarVinos({ tipo, cepa, bodega, anada, page, pageSize } = {}) {
+export async function listarVinos({ tipo, id_cepa, cuit_bodega, anada, nombre, page, page_size, pageSize } = {}) {
   return request("/vinos", {
     method: "GET",
-    params: { tipo, cepa, bodega, anada, page, pageSize }
+    params: { tipo, id_cepa, cuit_bodega, anada, nombre, page, page_size: page_size ?? pageSize }
   });
 }
 
