@@ -5,6 +5,8 @@
  * Permite registrar nuevas pantallas mediante `registrarRuta(ruta, renderFn)`.
  */
 
+import { iniciarCatalogo } from "./screens/catalogo.js";
+
 const DEFAULT_ROUTE = "#/vinos";
 
 /**
@@ -50,7 +52,9 @@ function actualizarNavegacion(hashActual) {
  */
 function crearPlaceholder(titulo, descripcion) {
   return function renderPlaceholder(contenedor) {
-    contenedor.innerHTML = "";
+    while (contenedor.firstElementChild) {
+      contenedor.removeChild(contenedor.firstElementChild);
+    }
 
     const card = document.createElement("section");
     card.className = "placeholder-card";
@@ -80,7 +84,9 @@ function crearPlaceholder(titulo, descripcion) {
  * @param {string} hash - Hash solicitado no registrado.
  */
 function renderNoEncontrado(contenedor, hash) {
-  contenedor.innerHTML = "";
+  while (contenedor.firstElementChild) {
+    contenedor.removeChild(contenedor.firstElementChild);
+  }
 
   const card = document.createElement("section");
   card.className = "card error-card";
@@ -135,13 +141,9 @@ function resolverRuta() {
  * Inicializa el enrutador por hash y registra las rutas base con sus placeholders.
  */
 export function initRouter() {
-  registrarRuta(
-    "#/vinos",
-    crearPlaceholder(
-      "Catálogo de Vinos",
-      "Listado general, filtros por tipo, cepa, bodega y añada. (Pendiente de implementación en issue futura)"
-    )
-  );
+  registrarRuta("#/vinos", (contenedor) => {
+    iniciarCatalogo(contenedor);
+  });
 
   registrarRuta(
     "#/vinos/nuevo",
