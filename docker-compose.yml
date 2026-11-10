@@ -45,6 +45,26 @@ services:
       - bodegas_net
 
   ########################################################################
+  # seed - Carga de datos iniciales (seed) en PostgreSQL
+  ########################################################################
+  seed:
+    build:
+      context: .
+      dockerfile: db/Dockerfile.seed
+    container_name: bodegas-seed
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGPORT: 5432
+      PGDATABASE: ${POSTGRES_DB:-bodegas_atuel}
+      PGUSER: ${POSTGRES_USER:-owner_bodegas}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?define POSTGRES_PASSWORD en .env}
+    networks:
+      - bodegas_net
+
+  ########################################################################
   # api - API REST (Preparado para incorporar en etapas posteriores)
   ########################################################################
   # api:
