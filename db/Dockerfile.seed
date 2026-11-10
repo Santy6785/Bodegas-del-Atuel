@@ -9,14 +9,13 @@
 
 FROM python:3-slim
 
-# Dependencias del script de carga (psycopg v3 + Faker)
-RUN pip install --no-cache-dir "psycopg[binary]" faker
+# Dependencias del script de carga (psycopg v3 + Faker) con versiones fijas y estables
+RUN pip install --no-cache-dir "psycopg[binary]==3.2.2" "faker==21.2.0"
 
 WORKDIR /seed
 
 # CSV del catalogo y script de carga (aportados por otros integrantes)
 COPY db/seed/ ./
 
-# TODO: reemplazar 'cargar.py' por el nombre real del script de carga de db/seed/
-# y ajustar las variables de entorno que este requiera.
-CMD ["sh", "-c", "if [ -f /seed/cargar.py ]; then python /seed/cargar.py; else echo 'TODO: crear db/seed/cargar.py o actualizar el CMD de db/Dockerfile.seed'; exit 1; fi"]
+# Ejecuta el script de seeding contra PostgreSQL
+CMD ["python", "/seed/seed.py"]
