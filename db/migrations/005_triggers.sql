@@ -562,6 +562,51 @@ AFTER INSERT OR UPDATE OR DELETE ON cliente_exportador
 DEFERRABLE INITIALLY DEFERRED
 FOR EACH ROW EXECUTE FUNCTION trg_validar_tipo_cliente();
 
+-- ---------------------------------------------------------------------
+-- trg_permiso_u6_descuento  (AFTER INSERT OR DELETE en permiso_exportacion)
+--
+-- Regla: U6 / RN-06. Un exportador con mas de 3 permisos de exportacion
+--        tiene 35 % de descuento; con 3 o menos, 30 %.
+--
+-- El valor queda almacenado en cliente_exportador.porcentaje_descuento y
+-- lo mantiene este trigger. Los renglones ya vendidos conservan su
+-- descuento_pct (snapshot), por lo que el cambio solo afecta ventas nuevas.
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION trg_permiso_u6_descuento()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_id   INTEGER;
+    v_cant INTEGER;
+    v_pct  NUMERIC(5,2);
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        v_id := OLD.id_cliente;
+    ELSE
+        v_id := NEW.id_cliente;
+    END IF;
+
+    SELECT count(*) INTO v_cant
+      FROM permiso_exportacion p
+     WHERE p.id_cliente = v_id;
+
+    v_pct := CASE WHEN v_cant > 3 THEN 35.00 ELSE 30.00 END;
+
+    UPDATE cliente_exportador e
+       SET porcentaje_descuento = v_pct
+     WHERE e.id_cliente = v_id
+       AND e.porcentaje_descuento IS DISTINCT FROM v_pct;
+
+    RETURN NULL;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_permiso_u6_descuento ON permiso_exportacion;
+CREATE TRIGGER trg_permiso_u6_descuento
+AFTER INSERT OR DELETE ON permiso_exportacion
+FOR EACH ROW EXECUTE FUNCTION trg_permiso_u6_descuento();
+
 COMMIT;
 
 -- =====================================================================
