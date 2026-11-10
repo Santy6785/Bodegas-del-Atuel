@@ -2,6 +2,7 @@
  * Bodegas del Atuel - Punto de Entrada Principal (Main)
  *
  * Inicializa el enrutador del cliente y ejecuta el chequeo de salud inicial contra la API.
+ * Si USAR_FIXTURES es true, no se consulta la API y el indicador muestra "Simulado".
  */
 
 import { initRouter } from "./router.js";
@@ -13,6 +14,13 @@ import { verificarSalud } from "./api/index.js";
 async function comprobarSaludApi() {
   const statusEl = document.getElementById("api-status");
   if (!statusEl) return;
+
+  if (window.APP_CONFIG?.USAR_FIXTURES === true) {
+    statusEl.className = "api-status loading";
+    statusEl.textContent = "Simulado";
+    statusEl.title = "Modo datos simulados: la API no se consulta.";
+    return;
+  }
 
   statusEl.className = "api-status loading";
   statusEl.textContent = "Verificando...";

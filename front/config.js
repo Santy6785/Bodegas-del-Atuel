@@ -10,6 +10,6 @@
  * o genera dinámicamente con la URL base del entorno correspondiente.
  */
 window.APP_CONFIG = {
-  API_BASE_URL: "http://localhost:8000"
-  USAR_FIXTURES: true,
+  API_BASE_URL: "http://localhost:8000",
+  USAR_FIXTURES: true
 };
