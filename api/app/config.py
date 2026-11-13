@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     db_pool_min: int = 1
     db_pool_max: int = 10
 
+    # --- NUEVO: Timeouter de declaración de consulta ---
+    # Tiempo máximo que una consulta puede ejecutarse antes de ser cancelada
+    # Esto protege contra queries colgados o que devuelven resultados masivos
+    db_statement_timeout: int = 60  # 60 segundos por defecto
+
     # API
     api_port: int = 8000
     cors_origins: str = "http://localhost:3000,http://localhost:5173"
@@ -32,6 +37,8 @@ class Settings(BaseSettings):
     @property
     def conninfo(self) -> str:
         """Cadena de conexión PostgreSQL armada con psycopg.conninfo.make_conninfo."""
+        # Agregamos el statement_timeout a la conexión options
+        options = f"-c statement_timeout={self.db_statement_timeout}"
         return make_conninfo(
             host=self.db_host,
             port=self.db_port,
@@ -39,6 +46,7 @@ class Settings(BaseSettings):
             user=self.db_user,
             password=self.db_password,
             sslmode=self.db_sslmode,
+            options=options,
         )
 
 
