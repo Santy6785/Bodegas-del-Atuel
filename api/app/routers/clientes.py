@@ -15,7 +15,7 @@ from app.db.pool import get_conn
 from app.db.queries.clientes import listar_clientes
 
 router = APIRouter(prefix="/clientes", tags=["Clientes"])
-
+q: str | None = Query(None, max_length=100)
 
 @router.get("")
 def listar_clientes_endpoint(

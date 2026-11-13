@@ -21,28 +21,17 @@ def listar_clientes(
     page: int = 1,
     page_size: int = 20,
     tipo_cliente: str | None = None,
+    q: str | None = None,
 ) -> tuple[list[dict], int]:
-    """Obtiene el listado paginado de clientes con su descuento calculado por la base.
+    """Listado paginado de clientes, con búsqueda opcional por texto o documento.
 
-    El descuento_pct es 10.00 (socio), 20.00 (distribuidor), 30.00 u 35.00 (exportador según
-    cantidad de permisos), determinado por fn_descuento_cliente.
+    Parámetro q:
+        - Si es solo dígitos (posible documento), filtra por prefijo de nro_documento.
+        - Si no, busca por apellido_razon_social o nombre (ILIKE, contiene).
+        Los caracteres % _ \\ del usuario se escapan para que sean literales.
 
-    Tipo de operación: Lectura.
-    Transacción: No requerida.
+    Tipo de operación: Lectura. Transacción: No requerida.
     Objeto de base: Tabla cliente y función fn_descuento_cliente.
-
-    Parámetros:
-        conn: Conexión activa a PostgreSQL.
-        page: Número de página (1-based, mínimo 1).
-        page_size: Tamaño de página (mínimo 1, máximo 100).
-        tipo_cliente: Filtro por tipo ('socio', 'distribuidor', 'exportador').
-
-    Devuelve:
-        Tupla (items, total) con los datos del cliente y descuento_pct calculado por la base.
-
-    Errores posibles:
-        ValueError: Si page o page_size están fuera de rango.
-        psycopg.Error: Falla en la comunicación con la base de datos.
     """
     validar_rango_paginacion(page, page_size)
 
@@ -52,6 +41,20 @@ def listar_clientes(
     if tipo_cliente is not None:
         condiciones.append("c.tipo_cliente = %s")
         params.append(tipo_cliente)
+
+    if q is not None and q.strip():
+        termino = q.strip()
+        if termino.isdigit():
+            # Prefijo de documento: "3012" encuentra 30123456, 30123457...
+            condiciones.append("c.nro_documento LIKE %s ESCAPE '\\'")
+            params.append(_escapar_like(termino) + "%")
+        else:
+            condiciones.append(
+                "(c.apellido_razon_social ILIKE %s ESCAPE '\\' "
+                " OR c.nombre ILIKE %s ESCAPE '\\')"
+            )
+            patron = "%" + _escapar_like(termino) + "%"
+            params.extend([patron, patron])
 
     where_sql = (" WHERE " + " AND ".join(condiciones)) if condiciones else ""
     offset = (page - 1) * page_size
@@ -64,9 +67,10 @@ def listar_clientes(
                count(*) OVER() AS total
           FROM cliente c
          {where_sql}
-         ORDER BY c.id_cliente ASC
+         ORDER BY c.apellido_razon_social ASC, c.id_cliente ASC
          LIMIT %s OFFSET %s
     """
+    # ... resto igual (rows, total, count de página vacía)
 
     with conn.cursor() as cur:
         cur.execute(query, params + [page_size, offset])
@@ -83,6 +87,9 @@ def listar_clientes(
         total_real = int(count_row["total"]) if count_row else 0
         return [], total_real
 
+def _escapar_like(texto: str) -> str:
+    """Escapa los metacaracteres de LIKE para tratarlos como texto literal."""
+    return texto.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 def obtener_cliente(conn: psycopg.Connection, id_cliente: int) -> dict | None:
     """Obtiene el detalle completo de un cliente incluyendo datos de su subtipo y permisos.
