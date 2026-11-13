@@ -17,6 +17,7 @@ import {
   detallesVinoFixture,
   cepasFixture,
   bodegasFixture,
+  clientesFixture,
 } from "./catalogo.js";
 
 /**
@@ -107,4 +108,46 @@ export function listarCepasSimulado() {
  */
 export function listarBodegasSimulado() {
   return [...bodegasFixture];
+}
+
+/**
+ * Busca y paginea clientes simulados aplicando el filtro de texto libre `q`
+ * del contrato (sección 4.2 GET /clientes): busca por apellido, razón social,
+ * nombre o prefijo de documento. Los filtros se combinan con AND.
+ *
+ * @param {object} [filtros={}]
+ * @param {string} [filtros.q] - Texto libre de búsqueda.
+ * @param {string} [filtros.tipo_cliente] - "socio" | "distribuidor" | "exportador".
+ * @param {number} [filtros.page]
+ * @param {number} [filtros.page_size]
+ * @returns {{ items: object[], page: number, page_size: number, total: number }}
+ */
+export function buscarClientesSimulado({
+  q,
+  tipo_cliente,
+  page = 1,
+  page_size = 20,
+} = {}) {
+  let resultado = clientesFixture;
+
+  if (tipo_cliente) {
+    resultado = resultado.filter((c) => c.tipo_cliente === tipo_cliente);
+  }
+  if (q) {
+    const term = String(q).toLowerCase();
+    resultado = resultado.filter(
+      (c) =>
+        c.apellido_razon_social.toLowerCase().includes(term) ||
+        (c.nombre && c.nombre.toLowerCase().includes(term)) ||
+        c.nro_documento.toLowerCase().startsWith(term)
+    );
+  }
+
+  const total = resultado.length;
+  const pagina = Math.max(1, Number(page) || 1);
+  const tamanio = Math.max(1, Number(page_size) || 20);
+  const inicio = (pagina - 1) * tamanio;
+  const items = resultado.slice(inicio, inicio + tamanio);
+
+  return { items, page: pagina, page_size: tamanio, total };
 }

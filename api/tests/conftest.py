@@ -26,13 +26,15 @@ def _owner_conninfo() -> str:
     """Cadena de conexión para el rol propietario (owner_bodegas).
 
     Lee credenciales de variables de entorno (definidas en .env). Nunca
-    se escriben valores en el código.
+    se escriben valores en el código. Usa el mismo DB_PORT que el rol de
+    aplicación (get_settings) para no apuntar a un puerto distinto al de
+    la base de datos local.
     """
     from psycopg.conninfo import make_conninfo
 
     return make_conninfo(
         host=os.environ.get("DB_HOST", "localhost"),
-        port=int(os.environ.get("DB_PORT", "5433")),
+        port=int(os.environ.get("DB_PORT", "5432")),
         dbname=os.environ.get("POSTGRES_DB", "bodegas_atuel"),
         user=os.environ.get("POSTGRES_USER", "owner_bodegas"),
         password=os.environ.get("POSTGRES_PASSWORD", "pgadmin"),

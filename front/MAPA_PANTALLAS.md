@@ -144,7 +144,7 @@ Registrar la emisión de un comprobante de venta de vinos a un cliente determina
   - `id_sala` (number, sala de venta física donde se realiza la transacción).
   - `renglones` (array de ítems vendidos): lista de objetos `[{ cod_vino: number, cantidad: number }]`.
 - **Datos que muestra:**
-  - Buscador de clientes (con unos 20.000 registros no corresponde un desplegable completo; se usa la búsqueda `q` de `GET /clientes`, pendiente en el contrato).
+  - Buscador de clientes (con unos 20.000 registros no corresponde un desplegable completo; se usa la búsqueda `q` de `GET /clientes`).
   - Selector de sala de venta.
   - Grilla interactiva de selección de vino y cantidad para conformar el carrito antes del envío.
   - Tabla de liquidación del comprobante emitido:
@@ -160,7 +160,7 @@ Registrar la emisión de un comprobante de venta de vinos a un cliente determina
 |---|---|---|---|---|---|---|
 | Registrar y emitir el comprobante | `/comprobantes` | `POST` | **Body:** `{ id_cliente, id_sala, renglones: [{ cod_vino, cantidad }] }` | Comprobante emitido con `nro_comprobante` asignado | `crearComprobante(data)` en `comprobantes.js` | Enunciado / Bocetos |
 | Consultar detalle liquidado del comprobante | `/comprobantes/{nro}` | `GET` | **Ruta:** `nro` (nro_comprobante) | Objeto con cabecera (`subtotal`, `descuento`, `total`, `fecha`) y array `renglones` (`precio_unitario`, `descuento_pct`, `subtotal`) | `obtenerComprobante(nro)` en `comprobantes.js` | Enunciado / Bocetos |
-| Buscar y seleccionar el cliente | `/clientes` | `GET` | **Query:** `page`, `page_size`, `tipo_cliente`; `q` (búsqueda por documento o apellido, **pendiente de agregar al contrato**) | Objeto paginado `{ items, page, page_size, total }`; cada ítem con `id_cliente`, `apellido_razon_social`, `nombre`, `tipo_documento`, `nro_documento`, `tipo_cliente`, `descuento_pct` | `listarClientes(filtros)` en `clientes.js` | Enunciado |
+| Buscar y seleccionar el cliente | `/clientes` | `GET` | **Query:** `page`, `page_size`, `tipo_cliente`, `q` (búsqueda por documento o apellido) | Objeto paginado `{ items, page, page_size, total }`; cada ítem con `id_cliente`, `apellido_razon_social`, `nombre`, `tipo_documento`, `nro_documento`, `tipo_cliente`, `descuento_pct` | `listarClientes(filtros)` en `clientes.js` | Enunciado |
 | Selector de salas de venta | `/salas` | `GET` | Ninguno | Array de salas `[{ id_sala, calle, numero, dia_cierre, codigo_postal }]` (no existe campo "nombre"; la etiqueta del desplegable se arma con calle y número) | `listarSalas()` en `catalogos.js` | **PROPUESTO** (No listado en mínimos) |
 | Selector de vinos disponibles para venta | `/vinos` | `GET` | **Query:** `nombre` (búsqueda parcial), `page`, `page_size` | Objeto paginado `{ items, page, page_size, total }` (cada ítem con `cod_vino`, `nombre`, `precio`, etc.) | `listarVinos(filtros)` en `vinos.js` | Enunciado |
 
@@ -311,7 +311,7 @@ La tabla siguiente define el estado de cada catálogo requerido por la interfaz:
 | **Salas de Venta** | - Nueva Venta<br>- Transferencias (Solicitante)<br>- Tablero (Filtro stock) | `GET /salas` | **PROPUESTO / FALTANTE** | `listarSalas()` en `catalogos.js` | Esencial para asignar comprobantes a su punto de venta y direccionar transferencias. No figura en los mínimos del enunciado. |
 | **Maridajes** | - Detalle de Vino (Catálogo)<br>- Alta de Maridajes | `GET /maridajes` | **PROPUESTO / FALTANTE** | `listarMaridajes()` en `catalogos.js` | Requerido si se desea asociar o consultar maridajes formalmente. No figura en los mínimos del enunciado. |
 | **Tipos de Vino** | - Catálogo (Filtro)<br>- Alta/Edición de Vino | Sin endpoint (lista fija local) | **LOCAL** | Constante en el front | Los valores son los del enum `tipo_vino` de la base: `'tinto'`, `'blanco'`, `'rosado'`, `'espumante'`. No requiere endpoint; el valor que se envía a la API va en minúscula. |
-| **Clientes** | - Nueva Venta | `GET /clientes` | **EXISTENTE (Enunciado)** | `listarClientes(filtros)` en `clientes.js` | Devuelve clientes (socios, distribuidores, exportadores) para vincular al comprobante. Con unos 20.000 registros requiere búsqueda por texto (`q`), pendiente en el contrato. |
+| **Clientes** | - Nueva Venta | `GET /clientes` | **EXISTENTE (Enunciado)** | `listarClientes(filtros)` en `clientes.js` | Devuelve clientes (socios, distribuidores, exportadores) para vincular al comprobante. Con unos 20.000 registros requiere búsqueda por texto (`q`). |
 | **Vinos (Activos)** | - Nueva Venta (Renglones)<br>- Transferencias (Renglones) | `GET /vinos` | **EXISTENTE (Enunciado)** | `listarVinos(filtros)` en `vinos.js` | Se utiliza para autocompletar la selección de botellas a vender o transferir. |
 | **Historial de Transferencias** | - Transferencias (Grilla) | `GET /transferencias` | **PROPUESTO / FALTANTE** | `listarTransferencias(filtros)` en `transferencias.js` | El boceto de la pantalla #4 exige listar las transferencias existentes y sus estados (`en_confeccion`, `terminado`, `procesado`). El enunciado solo incluye `POST` para el circuito. |
 
@@ -413,11 +413,6 @@ Al contrastar los requerimientos de interfaz plasmados en los bocetos de la issu
 - **Qué pantalla lo necesita:** Pantalla 2 (Alta y Edición de Vino).
 - **Propuesta de solución:** Que `POST /vinos` y `PUT /vinos/{cod}` acepten los arrays `composicion: [{ id_cepa, porcentaje }]` y `maridajes: [id]` dentro del mismo cuerpo JSON, realizando la inserción del vino y de los registros de `vino_cepa` y `vino_maridaje` en una única transacción atómica en PostgreSQL.
 
-### Brecha 8: Búsqueda de clientes (`GET /clientes?q=`)
-- **Qué falta:** `GET /clientes` solo filtra por `tipo_cliente` y pagina; con unos 20.000 clientes no se puede elegir uno en la pantalla Nueva Venta.
-- **Qué pantalla lo necesita:** Pantalla 3 (Nueva Venta).
-- **Propuesta de solución:** parámetro `q` (búsqueda parcial por apellido o razón social, o por número de documento), solicitado a quien mantiene el contrato. Hasta que exista, `listarClientes` no lo envía.
-
 ---
 
 ## ❓ Supuestos y Dudas a Validar con el Grupo
@@ -427,6 +422,4 @@ Al contrastar los requerimientos de interfaz plasmados en los bocetos de la issu
 3. **Persistencia de Maridajes:** En el boceto del catálogo, el detalle de vino muestra maridajes y temperatura (`vino_maridaje` y `maridaje` vía `GET /vinos/{cod}`). Para el alta y edición, el contrato `POST /vinos` y `PUT /vinos/{cod}` ya incorpora el campo `maridajes` como una lista de identificadores numéricos `[id_maridaje]`.
 4. **Política CORS:** Se asume que `CORS_ORIGINS` de la API incluye el origen desde donde se sirve el front (verificar `CORS_ORIGINS` en `.env.example` y el puerto del contenedor del front en `docker-compose.yml`).
 5. **Precisión Numérica de Moneda:** El contrato serializa los importes (`NUMERIC`) como **string decimal** (ej. `"12500.00"`); el front solo los muestra (agrega `$` y separador de miles) y no opera con ellos.
-
-
 

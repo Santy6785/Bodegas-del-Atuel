@@ -6,6 +6,7 @@
  */
 
 import { iniciarCatalogo } from "./screens/catalogo.js";
+import { montarBuscadorClientes } from "./components/buscador-clientes.js";
 
 const DEFAULT_ROUTE = "#/vinos";
 
@@ -112,6 +113,8 @@ function renderNoEncontrado(contenedor, hash) {
 /**
  * Resuelve la ruta actual evaluando el fragmento hash y ejecuta la vista correspondiente.
  */
+let montajeActivo = null;
+
 function resolverRuta() {
   const appContainer = document.getElementById("app");
   if (!appContainer) {
@@ -127,11 +130,15 @@ function resolverRuta() {
     return;
   }
 
+  // Desmontar la pantalla anterior antes de renderizar la nueva
+  montajeActivo?.destruir?.();
+  montajeActivo = null;
+
   actualizarNavegacion(hash);
 
   const renderFn = rutas[hash];
   if (typeof renderFn === "function") {
-    renderFn(appContainer);
+    montajeActivo = renderFn(appContainer) ?? null;
   } else {
     renderNoEncontrado(appContainer, hash);
   }
@@ -153,13 +160,33 @@ export function initRouter() {
     )
   );
 
-  registrarRuta(
-    "#/ventas/nueva",
-    crearPlaceholder(
-      "Nueva Venta",
-      "Confección y emisión de comprobantes de venta a clientes socios, distribuidores y exportadores. (Pendiente de implementación en issue futura)"
-    )
-  );
+  registrarRuta("#/ventas/nueva", (contenedor) => {
+    contenedor.replaceChildren();
+    const seccion = document.createElement("section");
+    seccion.className = "card";
+
+    const h2 = document.createElement("h2");
+    h2.textContent = "Nueva Venta";
+
+    const bloqueCliente = document.createElement("div");
+    bloqueCliente.className = "bloque-cliente";
+    const etiqueta = document.createElement("p");
+    etiqueta.textContent = "Cliente:";
+    const detalle = document.createElement("p");
+    detalle.className = "cliente-seleccionado";
+    detalle.textContent = "Ninguno seleccionado";
+
+    seccion.append(h2, bloqueCliente);
+    bloqueCliente.append(etiqueta, detalle);
+    contenedor.appendChild(seccion);
+
+    const buscador = document.createElement("div");
+    bloqueCliente.appendChild(buscador);
+    const control = montarBuscadorClientes(buscador, (cliente) => {
+      detalle.textContent = `${cliente.apellido_razon_social} (id ${cliente.id_cliente})`;
+    });
+    return control; // { destruir }
+  });
 
   registrarRuta(
     "#/transferencias",

@@ -5,6 +5,8 @@ cliente_exportador con permiso_exportacion). Los porcentajes de descuento no se
 envían ni se recalculan en Python: se leen de fn_descuento_cliente(id_cliente).
 """
 
+import re
+
 import psycopg
 
 from ._reglas import (
@@ -13,6 +15,12 @@ from ._reglas import (
     validar_nombre_cliente,
     validar_rango_paginacion,
 )
+
+
+# Patrón ASCII que reconoce un posible número de documento: empieza por dígito y
+# el resto son solo dígitos, puntos, guiones o espacios. Permite buscar "30-1234"
+# o "12.345" como si fueran "301234" o "12345".
+_PATRON_DOCUMENTO = re.compile(r"[0-9][0-9.\- ]*")
 
 
 def listar_clientes(
@@ -26,7 +34,9 @@ def listar_clientes(
     """Listado paginado de clientes, con búsqueda opcional por texto o documento.
 
     Parámetro q:
-        - Si es solo dígitos (posible documento), filtra por prefijo de nro_documento.
+        - Si coincide con patrón de documento (dígitos, opcionalmente separados por
+          puntos, guiones o espacios), se normalizan los separadores y se filtra por
+          prefijo de nro_documento (ej. "30-1234" y "12.345" buscan "301234" y "12345").
         - Si no, busca por apellido_razon_social o nombre (ILIKE, contiene).
         Los caracteres % _ \\ del usuario se escapan para que sean literales.
 
@@ -44,10 +54,12 @@ def listar_clientes(
 
     if q is not None and q.strip():
         termino = q.strip()
-        if termino.isdigit():
-            # Prefijo de documento: "3012" encuentra 30123456, 30123457...
+        if _PATRON_DOCUMENTO.fullmatch(termino):
+            # Posible documento con separadores: se normalizan quitando puntos,
+            # guiones y espacios para buscar por prefijo de nro_documento.
+            solo_digitos = re.sub(r"[.\- ]", "", termino)
             condiciones.append("c.nro_documento LIKE %s ESCAPE '\\'")
-            params.append(_escapar_like(termino) + "%")
+            params.append(_escapar_like(solo_digitos) + "%")
         else:
             condiciones.append(
                 "(c.apellido_razon_social ILIKE %s ESCAPE '\\' "
