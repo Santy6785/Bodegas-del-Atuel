@@ -27,7 +27,7 @@ import psycopg
 DBNAME = os.environ.get("PGDATABASE", "bodegas_atuel_bench")
 USER = os.environ.get("PGUSER", "owner_bodegas")
 HOST = os.environ.get("PGHOST")          # None => socket local de Unix
-PORT = os.environ.get("PGPORT", "5432")
+PORT = os.environ.get("PGPORT")
 PASSWORD = os.environ.get("PGPASSWORD")
 
 REPS = 3
@@ -42,9 +42,11 @@ COPY_SQL = f"COPY bench_renglon ({COL_LIST}) FROM STDIN WITH (FORMAT csv)"
 
 
 def connect():
-    kwargs = dict(dbname=DBNAME, user=USER, port=PORT)
+    kwargs = dict(dbname=DBNAME, user=USER)
     if HOST:
         kwargs["host"] = HOST
+    if PORT:
+        kwargs["port"] = PORT
     if PASSWORD:
         kwargs["password"] = PASSWORD
     return psycopg.connect(**kwargs)
@@ -115,12 +117,16 @@ def method_d(con, n, batch=1000):
     cur = con.cursor()
     commit_reset(cur, con)
     rows = [make_row(i) for i in range(n)]
-    t0 = time.perf_counter()
+    # Armado de strings de VALUES fuera del cronómetro
+    chunks = []
     for start in range(0, n, batch):
         chunk = rows[start:start + batch]
         values = ", ".join(
             "(" + ",".join(str(v) for v in r) + ")" for r in chunk
         )
+        chunks.append(values)
+    t0 = time.perf_counter()
+    for values in chunks:
         cur.execute(f"INSERT INTO bench_renglon ({COL_LIST}) VALUES {values}")
     con.commit()
     t1 = time.perf_counter()
@@ -139,11 +145,12 @@ def method_e(con, n):
         for line in buf:
             cp.write(line)
     con.commit()
+    t1 = time.perf_counter()
+    # COUNT(*) fuera de la zona cronometrada
     cur.execute("SELECT COUNT(*) FROM bench_renglon")
     carga = cur.fetchone()[0]
     if carga != n:
         print(f"  !! ADVERTENCIA COPY: esperadas {n} filas, cargadas {carga}")
-    t1 = time.perf_counter()
     return t1 - t0
 
 
@@ -153,19 +160,39 @@ def run(label, fn, con, n):
     rows_s = n / med if med > 0 else float("inf")
     print(f"{label}: N={n} reps={[round(t, 4) for t in times]} "
           f"mediana={med:.4f}s filas/s={rows_s:,.0f}")
-    return med, rows_s
+    return (label, n, med, rows_s)
+
+
+def print_final_table(results):
+    """Imprime la tabla final de resultados.
+
+    Una fila por (método, N), columna N con valores, ordenada por filas/s
+    dentro de cada N. Función pura: no abre conexión a la BD.
+    """
+    # Agrupar por N
+    by_n = {}
+    for label, n, med, rows_s in results:
+        by_n.setdefault(n, []).append((label, med, rows_s))
+
+    print("\n== Tabla final ordenada por filas/s dentro de cada N ==")
+    print(f"{'Método':<40} {'N':>8} {'mediana(s)':>12} {'filas/s':>14}")
+    for n in sorted(by_n.keys()):
+        group = sorted(by_n[n], key=lambda r: r[2], reverse=True)
+        for label, med, rows_s in group:
+            print(f"{label:<40} {n:>8} {med:>12.4f} {rows_s:>14,.0f}")
 
 
 def optional_trigger_cost(con):
     """Costo de los triggers sobre la tabla real renglon_comprobante (ROLLBACK).
 
-    La PK de renglon_comprobante es (nro_comprobante, cod_vino), por lo que se
-    crean 10 comprobantes x 50 vinos = 500 pares distintos antes de insertar.
-    Todo se revierte al final.
+    Mide INSERT con triggers ON y OFF en la misma transacción, usando los
+    mismos datos (ON primero, luego OFF, sin alternar). Al final hace ROLLBACK para no dejar
+    rastro en la base.
     """
     print("\n--- Opcional: costo de triggers sobre renglon_comprobante real (ROLLBACK) ---")
     cur = con.cursor()
     try:
+        # Datos padre (se revierten con el ROLLBACK final)
         cur.execute(
             "INSERT INTO localidad (codigo_postal, nombre, provincia, encargado_regional) "
             "VALUES ('5500','Mendoza','Mendoza','enc')")
@@ -226,6 +253,7 @@ def optional_trigger_cost(con):
             if len(rows) >= n:
                 break
 
+        # Medición con triggers ON
         t0 = time.perf_counter()
         cur.executemany(
             "INSERT INTO renglon_comprobante (nro_comprobante, cod_vino, cantidad, "
@@ -233,14 +261,34 @@ def optional_trigger_cost(con):
             rows,
         )
         t1 = time.perf_counter()
-        dt = t1 - t0
-        print(f"triggers ON: N={n} tiempo={dt:.4f}s filas/s={n/dt:,.0f} (todo ROLLBACK)")
+        dt_on = t1 - t0
+        print(f"triggers ON : N={n} tiempo={dt_on:.4f}s filas/s={n/dt_on:,.0f}")
+
+        # Medición con triggers OFF (mismos datos, misma transacción)
+        # TRUNCATE fuera del cronómetro para poder reinsertar los mismos datos
+        cur.execute("TRUNCATE TABLE public.renglon_comprobante")
+        cur.execute("ALTER TABLE public.renglon_comprobante DISABLE TRIGGER USER")
+        t0 = time.perf_counter()
+        cur.executemany(
+            "INSERT INTO renglon_comprobante (nro_comprobante, cod_vino, cantidad, "
+            "precio_unitario, descuento_pct, subtotal) VALUES (%s,%s,%s,%s,%s,%s)",
+            rows,
+        )
+        t1 = time.perf_counter()
+        dt_off = t1 - t0
+        print(f"triggers OFF: N={n} tiempo={dt_off:.4f}s filas/s={n/dt_off:,.0f}")
+        cociente = dt_on / dt_off if dt_off > 0 else float("inf")
+        print(f"cociente ON/OFF: {cociente:.2f}x")
+
+        # Re-habilitar triggers antes del ROLLBACK (por si acaso)
+        cur.execute("ALTER TABLE public.renglon_comprobante ENABLE TRIGGER USER")
     finally:
         con.rollback()
 
 
 def main():
     con = connect()
+    results = []
     try:
         with con.cursor() as cur:
             create_bench_table(cur)
@@ -250,21 +298,26 @@ def main():
         method_a(con, WARMUP_N)
 
         print("\n== Medición (3 repeticiones, mediana + filas/s) ==")
-        run("A  fila x fila + commit x fila", method_a, con, 2000)
-        run("B  fila x fila, 1 transacción", method_b, con, 10000)
-        run("C  executemany", method_c, con, 10000)
-        run("D  INSERT multi-fila lotes 1000", method_d, con, 10000)
-        run("E  COPY", method_e, con, 10000)
-        run("D  INSERT multi-fila lotes 1000", method_d, con, 100000)
-        run("E  COPY", method_e, con, 100000)
+        results.append(run("A  fila x fila + commit x fila", method_a, con, 2000))
+        results.append(run("B  fila x fila, 1 transacción", method_b, con, 10000))
+        results.append(run("C  executemany", method_c, con, 10000))
+        results.append(run("D  INSERT multi-fila lotes 1000", method_d, con, 10000))
+        results.append(run("E  COPY", method_e, con, 10000))
+        results.append(run("D  INSERT multi-fila lotes 1000", method_d, con, 100000))
+        results.append(run("E  COPY", method_e, con, 100000))
 
         optional_trigger_cost(con)
 
-        with con.cursor() as cur:
-            cur.execute("DROP TABLE IF EXISTS bench_renglon")
-            con.commit()
-        print("\nbench_renglon soltada (try/finally).")
+        print_final_table(results)
     finally:
+        # DROP de bench_renglon en finally real
+        try:
+            with con.cursor() as cur:
+                cur.execute("DROP TABLE IF EXISTS bench_renglon")
+                con.commit()
+            print("\nbench_renglon soltada (finally).")
+        except Exception:
+            con.rollback()
         con.close()
 
 
