@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from app.db.pool import close_pool, get_conn, open_pool
 from app.db.queries.salud import verificar_conexion
 from app.errors import register_exception_handlers, traducir_error
+from app.routers.reportes import router as reportes_router
 from app.routers.clientes import router as clientes_router
 from app.routers.comprobantes import router as comprobantes_router
 from app.routers.transferencias import router as transferencias_router
@@ -37,6 +38,7 @@ register_exception_handlers(app)
 
 app.include_router(vinos_router)
 app.include_router(comprobantes_router)
+app.include_router(reportes_router)
 app.include_router(transferencias_router)
 app.include_router(clientes_router)
 
