@@ -41,7 +41,7 @@ fake = Faker("es_AR")
 DBNAME = os.environ.get("PGDATABASE", "bodegas_atuel_bench")
 USER = os.environ.get("PGUSER", "owner_bodegas")
 HOST = os.environ.get("PGHOST")          # None => socket local de Unix
-PORT = os.environ.get("PGPORT", "5432")
+PORT = os.environ.get("PGPORT", "5433")
 PASSWORD = os.environ.get("PGPASSWORD")
 
 SEED_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "catalogos")
