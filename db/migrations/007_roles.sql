@@ -24,19 +24,14 @@
 --        No puede modificar datos ni avanzar secuencias.
 --
 -- Las contraseñas se inyectan mediante variables psql (-v app_password=...
--- y -v ro_password=...), con valor por defecto si se ejecuta manualmente.
+-- y -v ro_password=...), definidas en .env y pasadas desde scripts/migrate.sh.
 -- =====================================================================
 
--- Parámetros de contraseñas con valor por defecto si no fueron provistas
-\if :{?app_password}
-\else
-  \set app_password 'cambiar_por_un_secreto_app'
-\endif
-
-\if :{?ro_password}
-\else
-  \set ro_password 'cambiar_por_un_secreto_ro'
-\endif
+-- Las contraseñas se inyectan mediante variables psql (-v app_password=...
+-- y -v ro_password=...), definidas en .env (APP_DB_PASSWORD / APP_RO_PASSWORD)
+-- y pasadas desde scripts/migrate.sh. Este archivo no contiene valores por
+-- defecto: los secretos se eliminaron del repositorio y deben proveerse por
+-- entorno; si faltan, psql fallará al evaluar :'app_password' / :'ro_password'.
 
 BEGIN;
 
@@ -63,6 +58,8 @@ END
 $roles$;
 
 -- Asignación de contraseñas parametrizadas
+\getenv app_password APP_DB_PASSWORD
+\getenv ro_password APP_RO_PASSWORD
 ALTER ROLE app_rw WITH PASSWORD :'app_password';
 ALTER ROLE reportes_ro WITH PASSWORD :'ro_password';
 

@@ -7,11 +7,11 @@ Endpoints mínimos para esta tarea:
 Delegan en app/db/queries/vinos.py. No hay SQL en este router.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 import psycopg
 
 from app.db.pool import get_conn
-from app.db.queries.vinos import crear_vino, eliminar_vino
+from app.db.queries.vinos import crear_vino, eliminar_vino, listar_vinos
 from app.schemas.modelos import VinoCreate
 
 router = APIRouter(prefix="/vinos", tags=["Vinos"])
@@ -30,6 +30,34 @@ def crear_vino_endpoint(
     payload = datos.model_dump()
     cod_vino = crear_vino(conn, payload)
     return {"cod_vino": cod_vino}
+
+
+@router.get("")
+def listar_vinos_endpoint(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    tipo: str | None = Query(default=None),
+    id_cepa: int | None = Query(default=None),
+    cuit_bodega: str | None = Query(default=None),
+    anada: int | None = Query(default=None),
+    nombre: str | None = Query(default=None),
+    conn: psycopg.Connection = Depends(get_conn),
+) -> dict:
+    """Listado paginado de vinos con filtros opcionales.
+
+    Delega la consulta en app/db/queries/vinos.py: no hay SQL en este router.
+    """
+    items, total = listar_vinos(
+        conn,
+        page=page,
+        page_size=page_size,
+        tipo=tipo,
+        id_cepa=id_cepa,
+        cuit_bodega=cuit_bodega,
+        anada=anada,
+        nombre=nombre,
+    )
+    return {"items": items, "page": page, "page_size": page_size, "total": total}
 
 
 @router.delete("/{cod_vino}", status_code=status.HTTP_204_NO_CONTENT)

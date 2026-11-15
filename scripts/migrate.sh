@@ -27,6 +27,17 @@ fi
 DB_USER="${POSTGRES_USER:-owner_bodegas}"
 DB_NAME="${POSTGRES_DB:-bodegas_atuel}"
 
+# Contraseña del rol de aplicación (app_rw) y de solo lectura (reportes_ro),
+# leídas de APP_DB_PASSWORD y APP_RO_PASSWORD en .env. Se inyectan al contenedor
+# Docker mediante -e (sin exponerlas en la línea de comandos) y, en modo
+# directo, se exportan como PGPASSWORD justo antes de invocar psql.
+APP_DB_PASSWORD="${APP_DB_PASSWORD:-}"
+APP_RO_PASSWORD="${APP_RO_PASSWORD:-${APP_DB_PASSWORD:-}}"
+
+# Variables psql: solo ON_ERROR_STOP=1 (las contraseñas viajan por entorno,
+# nunca con -v en la línea de comandos).
+PSQL_VARS=(-v ON_ERROR_STOP=1)
+
 # Función de ayuda
 show_help() {
   cat << 'EOF'
@@ -44,15 +55,23 @@ Modos de conexión:
   1. Modo Docker (por defecto):
      Ejecuta las migraciones dentro del contenedor 'db' vía 'docker compose exec'.
      Utiliza las variables POSTGRES_USER y POSTGRES_DB (de .env o entorno).
+     Las contraseñas (APP_DB_PASSWORD y APP_RO_PASSWORD) se inyectan al contenedor
+     con -e, por entorno, sin exponerlas en la línea de comandos.
   2. Modo Directo:
      Se activa si se pasa --url o si existe la variable DATABASE_URL.
      Ejecuta psql directamente con la cadena provista (adecuado para la nube o bases remotas).
+     La contraseña se exporta como PGPASSWORD (desde APP_DB_PASSWORD en .env) justo
+     antes de invocar psql, sin exponerla en la línea de comandos.
 
 Comportamiento:
   - Ejecuta cada migración con -v ON_ERROR_STOP=1 y --single-transaction (-1).
   - Si un archivo falla, la ejecución se detiene de inmediato sin tocar los siguientes.
   - El script NO es idempotente: reejecutar sobre una base ya migrada fallará
     en la primera migración por conflicto de objetos existentes.
+  - 008_indices.sql no se aplica aquí: ejecútala aparte con
+    scripts/aplicar_indices.sh (etapa 4 del TPI, para medir rendimiento).
+  - Las contraseñas viajan por entorno (APP_DB_PASSWORD / APP_RO_PASSWORD),
+    nunca en la línea de comandos ni en URLs.
 EOF
 }
 
@@ -94,6 +113,11 @@ else
   CONNECTION_MODE="docker"
 fi
 
+# Argumentos extra para 'docker compose exec ... psql'.
+# -e APP_DB_PASSWORD y -e APP_RO_PASSWORD inyectan las contraseñas por entorno
+# (Docker toma el valor del entorno del script; no aparecen en la línea de comandos).
+DOCKER_PSQL_ARGS=(-T db -e APP_DB_PASSWORD -e APP_RO_PASSWORD)
+
 # Validación previa: existencia del directorio de migraciones
 if [[ ! -d "$MIGRATIONS_DIR" ]]; then
   echo "ERROR: El directorio de migraciones '$MIGRATIONS_DIR' no existe." >&2
@@ -104,7 +128,7 @@ fi
 MIGRATION_FILES=()
 while IFS= read -r file; do
   [[ -n "$file" ]] && MIGRATION_FILES+=("$file")
-done < <(find "$MIGRATIONS_DIR" -maxdepth 1 -name "*.sql" -type f | LC_ALL=C sort)
+done < <(find "$MIGRATIONS_DIR" -maxdepth 1 -name "*.sql" -not -name "008_indices.sql" -type f | LC_ALL=C sort)
 
 TOTAL_MIGRATIONS=${#MIGRATION_FILES[@]}
 if [[ "$TOTAL_MIGRATIONS" -eq 0 ]]; then
@@ -151,6 +175,10 @@ if [[ "$CONNECTION_MODE" = "direct" ]]; then
     echo "ERROR: El modo directo requiere la herramienta 'psql' en el PATH del sistema." >&2
     exit 1
   fi
+  # PGPASSWORD viaja por entorno (desde APP_DB_PASSWORD en .env), no en la línea de comandos.
+  if [[ -n "${APP_DB_PASSWORD:-}" ]]; then
+    export PGPASSWORD="$APP_DB_PASSWORD"
+  fi
   TARGET_INFO=$(mask_connection_url "$DATABASE_URL")
   echo "Modo de conexión: DIRECTO (${TARGET_INFO})"
   echo "Comprobando conectividad inicial con la base de datos..."
@@ -166,7 +194,7 @@ else
   fi
   echo "Modo de conexión: DOCKER COMPOSE (Contenedor 'db' | Base: ${DB_NAME} | Usuario: ${DB_USER})"
   echo "Comprobando conectividad con el contenedor 'db'..."
-  if ! docker compose exec -T db psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -c "SELECT 1;" >/dev/null 2>&1; then
+  if ! docker compose exec "${DOCKER_PSQL_ARGS[@]}" psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -c "SELECT 1;" >/dev/null 2>&1; then
     echo "ERROR: No se pudo conectar a PostgreSQL dentro del contenedor 'db'." >&2
     echo "Asegúrese de que el servicio 'db' esté iniciado (ej. 'docker compose up -d') y en estado saludable." >&2
     exit 1
@@ -193,7 +221,7 @@ for mig in "${MIGRATION_FILES[@]}"; do
   echo "[$IDX/$TOTAL_MIGRATIONS] Aplicando $MIG_NAME..."
 
   if [[ "$CONNECTION_MODE" = "direct" ]]; then
-    if ! psql "$DATABASE_URL" -v ON_ERROR_STOP=1 --single-transaction < "$mig"; then
+    if ! psql "$DATABASE_URL" "${PSQL_VARS[@]}" --single-transaction < "$mig"; then
       echo "" >&2
       echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" >&2
       echo "ERROR CRÍTICO: Falló la migración '$MIG_NAME'." >&2
@@ -203,7 +231,7 @@ for mig in "${MIGRATION_FILES[@]}"; do
       exit 1
     fi
   else
-    if ! docker compose exec -T db psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 --single-transaction < "$mig"; then
+    if ! docker compose exec "${DOCKER_PSQL_ARGS[@]}" psql -U "$DB_USER" -d "$DB_NAME" "${PSQL_VARS[@]}" --single-transaction < "$mig"; then
       echo "" >&2
       echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" >&2
       echo "ERROR CRÍTICO: Falló la migración '$MIG_NAME'." >&2

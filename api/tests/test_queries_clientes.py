@@ -210,6 +210,139 @@ def test_crear_cliente_exportador_con_permisos(db_conn_commit: psycopg.Connectio
 
 
 @pytest.mark.integration
+def test_listar_clientes_filtro_q(db_conn_commit: psycopg.Connection):
+    """Caso: q de GET /clientes filtra por apellido, por prefijo de documento y trata % como literal.
+
+    Crea dos clientes con apellidos distintos y comprueba:
+      - q="Per" devuelve solo el cliente cuyo apellido contiene "Per".
+      - q="30123" devuelve solo el cliente cuyo documento empieza con ese prefijo.
+      - q="%" devuelve cero resultados (el % se trata como texto literal, no como comodín).
+    """
+    db_conn_commit.execute(
+        """
+        INSERT INTO localidad (codigo_postal, nombre, provincia, encargado_regional)
+        VALUES ('TEST5610', 'San Rafael', 'Mendoza', 'Encargado')
+        ON CONFLICT DO NOTHING;
+        """
+    )
+    cur = db_conn_commit.cursor()
+    # Cliente 1: apellido Peralta (contiene "Per"), documento 30123456 (prefijo 30123)
+    cur.execute(
+        """
+        INSERT INTO cliente (apellido_razon_social, nombre, tipo_documento, nro_documento, direccion, codigo_postal, tipo_cliente)
+        VALUES ('TEST Peralta', 'Juan', 'DNI', '30123456', 'Calle Falsa 123', 'TEST5610', 'socio')
+        RETURNING id_cliente;
+        """
+    )
+    id_peralta = cur.fetchone()["id_cliente"]
+    # Cliente 2: apellido García (no contiene "Per"), documento 40987654 (no empieza con 30123)
+    cur.execute(
+        """
+        INSERT INTO cliente (apellido_razon_social, nombre, tipo_documento, nro_documento, direccion, codigo_postal, tipo_cliente)
+        VALUES ('TEST García', 'María', 'DNI', '40987654', 'Avenida Siempre Viva 742', 'TEST5610', 'socio')
+        RETURNING id_cliente;
+        """
+    )
+    id_garcia = cur.fetchone()["id_cliente"]
+
+    try:
+        # q="Per" filtra por apellido que contiene "Per" (case-insensitive)
+        items, total = listar_clientes(db_conn_commit, q="Per")
+        assert total == 1
+        assert items[0]["id_cliente"] == id_peralta
+        assert items[0]["apellido_razon_social"] == "TEST Peralta"
+
+        # q="30123" filtra por prefijo de documento
+        items, total = listar_clientes(db_conn_commit, q="30123")
+        assert total == 1
+        assert items[0]["id_cliente"] == id_peralta
+        assert items[0]["nro_documento"] == "30123456"
+
+        # q="%" trata % como literal: no coincide con ningún documento ni apellido
+        items, total = listar_clientes(db_conn_commit, q="%")
+        assert total == 0
+        assert items == []
+    finally:
+        # Limpieza manual de los clientes creados (prefijo TEST no alcanza: el conftest
+        # solo borra apellidos/documentos TEST o 99%, y estos apellidos no empiezan por TEST)
+        db_conn_commit.execute(
+            "DELETE FROM cliente WHERE id_cliente IN (%s, %s)", (id_peralta, id_garcia)
+        )
+
+
+@pytest.mark.integration
+def test_listar_clientes_filtro_q_documento_con_separadores(
+    db_conn_commit: psycopg.Connection,
+):
+    """q con separadores de documento se normaliza y busca por prefijo de nro_documento.
+
+    Crea dos clientes y comprueba:
+      - q="301234" encuentra el cliente con documento 30123456.
+      - q="30-1234" (con guion) devuelve lo mismo que q="301234".
+      - q="12.345" (con punto) matchea el prefijo 12345 de otro cliente.
+    """
+    db_conn_commit.execute(
+        """
+        INSERT INTO localidad (codigo_postal, nombre, provincia, encargado_regional)
+        VALUES ('TEST5611', 'San Rafael', 'Mendoza', 'Encargado')
+        ON CONFLICT DO NOTHING;
+        """
+    )
+    cur = db_conn_commit.cursor()
+    cur.execute(
+        """
+        INSERT INTO cliente (apellido_razon_social, nombre, tipo_documento, nro_documento, direccion, codigo_postal, tipo_cliente)
+        VALUES ('TEST Doc Guion', 'Juan', 'DNI', '30123456', 'Calle 1', 'TEST5611', 'socio')
+        RETURNING id_cliente;
+        """
+    )
+    id_guion = cur.fetchone()["id_cliente"]
+    cur.execute(
+        """
+        INSERT INTO cliente (apellido_razon_social, nombre, tipo_documento, nro_documento, direccion, codigo_postal, tipo_cliente)
+        VALUES ('TEST Doc Punto', 'María', 'DNI', '12345678', 'Calle 2', 'TEST5611', 'socio')
+        RETURNING id_cliente;
+        """
+    )
+    id_punto = cur.fetchone()["id_cliente"]
+    cur.execute(
+        """
+        INSERT INTO cliente (apellido_razon_social, nombre, tipo_documento, nro_documento, direccion, codigo_postal, tipo_cliente)
+        VALUES ('TEST Otro', 'Luis', 'DNI', '40987654', 'Calle 3', 'TEST5611', 'socio')
+        RETURNING id_cliente;
+        """
+    )
+    id_otro = cur.fetchone()["id_cliente"]
+
+    try:
+        # q="301234" encuentra el documento 30123456
+        items, total = listar_clientes(db_conn_commit, q="301234")
+        assert total == 1
+        assert items[0]["id_cliente"] == id_guion
+        assert items[0]["nro_documento"] == "30123456"
+
+        # q="30-1234" (con guion) devuelve lo mismo que q="301234"
+        items_g, total_g = listar_clientes(db_conn_commit, q="30-1234")
+        assert total_g == total
+        assert [c["id_cliente"] for c in items_g] == [c["id_cliente"] for c in items]
+
+        # q="12.345" (con punto) matchea el prefijo 12345 del otro cliente
+        items_p, total_p = listar_clientes(db_conn_commit, q="12.345")
+        assert total_p == 1
+        assert items_p[0]["id_cliente"] == id_punto
+        assert items_p[0]["nro_documento"] == "12345678"
+
+        # El cliente cuyo documento no empieza con ninguno de esos prefijos no aparece
+        ids_devueltos = {c["id_cliente"] for c in items_g} | {c["id_cliente"] for c in items_p}
+        assert id_otro not in ids_devueltos
+    finally:
+        db_conn_commit.execute(
+            "DELETE FROM cliente WHERE id_cliente IN (%s, %s, %s)",
+            (id_guion, id_punto, id_otro),
+        )
+
+
+@pytest.mark.integration
 def test_crear_cliente_incoherencia_subtipo_falla_trigger(db_conn_commit: psycopg.Connection):
     """Prueba que el trigger diferido ctg_cliente_tipo rechace tipo socio con subtipo."""
     db_conn_commit.execute(

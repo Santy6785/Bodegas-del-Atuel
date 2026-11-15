@@ -5,6 +5,8 @@ cliente_exportador con permiso_exportacion). Los porcentajes de descuento no se
 envían ni se recalculan en Python: se leen de fn_descuento_cliente(id_cliente).
 """
 
+import re
+
 import psycopg
 
 from ._reglas import (
@@ -15,34 +17,31 @@ from ._reglas import (
 )
 
 
+# Patrón ASCII que reconoce un posible número de documento: empieza por dígito y
+# el resto son solo dígitos, puntos, guiones o espacios. Permite buscar "30-1234"
+# o "12.345" como si fueran "301234" o "12345".
+_PATRON_DOCUMENTO = re.compile(r"[0-9][0-9.\- ]*")
+
+
 def listar_clientes(
     conn: psycopg.Connection,
     *,
     page: int = 1,
     page_size: int = 20,
     tipo_cliente: str | None = None,
+    q: str | None = None,
 ) -> tuple[list[dict], int]:
-    """Obtiene el listado paginado de clientes con su descuento calculado por la base.
+    """Listado paginado de clientes, con búsqueda opcional por texto o documento.
 
-    El descuento_pct es 10.00 (socio), 20.00 (distribuidor), 30.00 u 35.00 (exportador según
-    cantidad de permisos), determinado por fn_descuento_cliente.
+    Parámetro q:
+        - Si coincide con patrón de documento (dígitos, opcionalmente separados por
+          puntos, guiones o espacios), se normalizan los separadores y se filtra por
+          prefijo de nro_documento (ej. "30-1234" y "12.345" buscan "301234" y "12345").
+        - Si no, busca por apellido_razon_social o nombre (ILIKE, contiene).
+        Los caracteres % _ \\ del usuario se escapan para que sean literales.
 
-    Tipo de operación: Lectura.
-    Transacción: No requerida.
+    Tipo de operación: Lectura. Transacción: No requerida.
     Objeto de base: Tabla cliente y función fn_descuento_cliente.
-
-    Parámetros:
-        conn: Conexión activa a PostgreSQL.
-        page: Número de página (1-based, mínimo 1).
-        page_size: Tamaño de página (mínimo 1, máximo 100).
-        tipo_cliente: Filtro por tipo ('socio', 'distribuidor', 'exportador').
-
-    Devuelve:
-        Tupla (items, total) con los datos del cliente y descuento_pct calculado por la base.
-
-    Errores posibles:
-        ValueError: Si page o page_size están fuera de rango.
-        psycopg.Error: Falla en la comunicación con la base de datos.
     """
     validar_rango_paginacion(page, page_size)
 
@@ -52,6 +51,22 @@ def listar_clientes(
     if tipo_cliente is not None:
         condiciones.append("c.tipo_cliente = %s")
         params.append(tipo_cliente)
+
+    if q is not None and q.strip():
+        termino = q.strip()
+        if _PATRON_DOCUMENTO.fullmatch(termino):
+            # Posible documento con separadores: se normalizan quitando puntos,
+            # guiones y espacios para buscar por prefijo de nro_documento.
+            solo_digitos = re.sub(r"[.\- ]", "", termino)
+            condiciones.append("c.nro_documento LIKE %s ESCAPE '\\'")
+            params.append(_escapar_like(solo_digitos) + "%")
+        else:
+            condiciones.append(
+                "(c.apellido_razon_social ILIKE %s ESCAPE '\\' "
+                " OR c.nombre ILIKE %s ESCAPE '\\')"
+            )
+            patron = "%" + _escapar_like(termino) + "%"
+            params.extend([patron, patron])
 
     where_sql = (" WHERE " + " AND ".join(condiciones)) if condiciones else ""
     offset = (page - 1) * page_size
@@ -64,9 +79,10 @@ def listar_clientes(
                count(*) OVER() AS total
           FROM cliente c
          {where_sql}
-         ORDER BY c.id_cliente ASC
+         ORDER BY c.apellido_razon_social ASC, c.id_cliente ASC
          LIMIT %s OFFSET %s
     """
+    # ... resto igual (rows, total, count de página vacía)
 
     with conn.cursor() as cur:
         cur.execute(query, params + [page_size, offset])
@@ -83,6 +99,9 @@ def listar_clientes(
         total_real = int(count_row["total"]) if count_row else 0
         return [], total_real
 
+def _escapar_like(texto: str) -> str:
+    """Escapa los metacaracteres de LIKE para tratarlos como texto literal."""
+    return texto.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 def obtener_cliente(conn: psycopg.Connection, id_cliente: int) -> dict | None:
     """Obtiene el detalle completo de un cliente incluyendo datos de su subtipo y permisos.

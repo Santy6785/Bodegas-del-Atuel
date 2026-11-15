@@ -361,7 +361,7 @@ Jerarquía supertipo/subtipos (`cliente`, `cliente_distribuidor`, `cliente_expor
 
 #### `GET /clientes`
 
-Query: `page`, `page_size`, `tipo_cliente` (`socio` | `distribuidor` | `exportador`).
+Query: `page`, `page_size`, `tipo_cliente` (`socio` | `distribuidor` | `exportador`), `q` (texto libre: busca por apellido, razón social, nombre o prefijo de documento).
 
 **Objeto de base:** consulta directa sobre `cliente` LEFT JOIN `cliente_distribuidor` / `cliente_exportador`. El campo `descuento_pct` se calcula con `SELECT fn_descuento_cliente(tipo_cliente)` en la consulta (no es un snapshot). **200:**
 

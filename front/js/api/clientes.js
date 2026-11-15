@@ -9,7 +9,14 @@ import { request } from "./client.js";
  * GET /clientes
  *
  * @param {object} [filtros={}] - Filtros de búsqueda (tipo_cliente, etc.) y paginación.
+ * @param {number} [filtros.page] - Número de página. Obligatorio.
+ * @param {number} [filtros.page_size] - Tamaño de página. Obligatorio. Máximo 100.
  * @returns {Promise<any>} Listado de clientes.
+ *
+ * @note La paginación es obligatoria (page, page_size) porque la base tiene
+ * ~20.000 clientes; no se permite listar sin paginar.
+ * @note La búsqueda por texto (parámetro q) está pendiente: ver docs/api-contrato.md.
+ * No se implementa aquí todavía.
  */
 export async function listarClientes(filtros = {}) {
   return request("/clientes", {
