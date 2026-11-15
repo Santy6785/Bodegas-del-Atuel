@@ -71,7 +71,7 @@ desde cero, usá `reset.sh`.
 
 ### Puertos expuestos al host
 Solo se exponen los puertos necesarios:
-- `db`: 5432 (necesario para scripts de backup/restore y acceso de desarrollo)
+- `db`: 5433 (necesario para scripts de backup/restore y acceso de desarrollo)
 - `api`: 8000
 - `front`: 5173
 

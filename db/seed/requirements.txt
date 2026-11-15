@@ -1,0 +1,4 @@
+# Versiones fijas para garantizar reproducibilidad determinística:
+# los datos generados por Faker dependen de la versión instalada.
+psycopg[binary]==3.3.8
+Faker==39.1.0

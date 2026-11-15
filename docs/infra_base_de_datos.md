@@ -174,7 +174,7 @@ docker compose exec -it db psql -U owner_bodegas -d bodegas_atuel
 
 ### 2. Vía Clientes Gráficos (DBeaver / pgAdmin / DataGrip)
 - **Host:** `localhost` (o `127.0.0.1`)
-- **Port:** Valor de `${DB_PORT:-5432}` (por defecto `5432`)
+- **Port:** Valor de `${DB_PORT:-5433}` (por defecto `5433`)
 - **Database:** `bodegas_atuel`
 - **Username:** `owner_bodegas`
 - **Password:** El valor configurado en `POSTGRES_PASSWORD` en tu `.env`
@@ -183,9 +183,9 @@ docker compose exec -it db psql -U owner_bodegas -d bodegas_atuel
 
 ## ⚠️ Problemas Comunes y Soluciones
 
-### 1. Puerto 5432 ocupado
+### 1. Puerto 5433 ocupado
 - **Causa:** Hay un servicio de PostgreSQL local corriendo en la máquina host.
-- **Solución:** En el archivo `.env`, cambiar la variable `DB_PORT` por otro puerto disponible (ej. `DB_PORT=5433`). La sintaxis `${DB_PORT:-5432}:5432` mapeará el puerto externo sin alterar el puerto interno del contenedor.
+- **Solución:** En el archivo `.env`, cambiar la variable `DB_PORT` por otro puerto disponible (ej. `DB_PORT=5433`). La sintaxis `${DB_PORT:-5433}:5432` mapeará el puerto externo sin alterar el puerto interno del contenedor.
 
 ### 2. Las migraciones no se re-ejecutan al modificar archivos `.sql`
 - **Causa:** El volumen nombrado `pgdata` ya contiene una base inicializada.
