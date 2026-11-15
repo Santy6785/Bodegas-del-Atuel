@@ -112,48 +112,38 @@ se ejecutan inmediatamente por fila, no al COMMIT.
 ## 5. Ejecución completa (PowerShell)
 
 ```powershell
-# 1. Crear base de bench y aplicar migraciones (ya hecho)
-docker cp db\migrations\001_esquema.sql bodegas-db:/tmp/001_esquema.sql
-docker exec bodegas-db psql -U owner_bodegas -d bodegas_atuel_bench -v ON_ERROR_STOP=1 -f /tmp/001_esquema.sql
-# ... repetir para 002 a 007
+# Flujo de carga: seed.py ejecuta TODO en una sola transacción
+# (01_pre_carga, catálogos, maestros, stock, movimientos, ventas,
+#  recálculo de totales, 03_post_carga, SET CONSTRAINTS ALL IMMEDIATE,
+#  02b_gate, COMMIT).
+docker compose run --rm -e PGDATABASE=bodegas_atuel_bench seed python -u seed.py
+```
 
-# 2. Copiar archivos de carga al contenedor
-docker cp db\seed\sql bodegas-db:/tmp/sql
-docker cp db\test\carga_pruebas.sql bodegas-db:/tmp/carga_pruebas.sql
+Datos reales de la ejecución:
+* Carga **170000** comprobantes y **680046** renglones en unos **97 s**.
+* El gate `02b_gate.sql` tarda unos **31 s**.
+* Si el gate falla, `seed.py` ejecuta `ROLLBACK` y los **15 triggers** quedan intactos en `'O'`.
+* Prueba de camino de error: con `-e FECHA_REF_ISO=2027-01-01` aborta en **C13a** (`Fallo en control C13a`) con **exit code 1**.
 
-# 3. Flujo de carga: UNA sola sesión de psql, una sola transacción.
-#    No ejecutar 01, 03 y 02b con comandos psql separados: cada -f es una
-#    sesión en autocommit y el DISABLE del 01 quedaría confirmado.
-docker exec -w /tmp bodegas-db psql -U owner_bodegas -d bodegas_atuel_bench -v ON_ERROR_STOP=1 -f /tmp/sql/00_flujo_carga.sql
-# Ejemplo de 00_flujo_carga.sql (uso manual, no está en el repo):
-#   BEGIN;
-#   \i /tmp/sql/01_pre_carga.sql
-#   -- INSERTs de la carga
-#   \i /tmp/sql/03_post_carga.sql
-#   SET CONSTRAINTS ALL IMMEDIATE;
-#   \i /tmp/sql/02b_gate.sql
-#   COMMIT;
-# El cargador Python debe ejecutar este mismo orden en su propia transacción,
-# leyendo los .sql y ejecutándolos con cur.execute (\i es un comando de psql y
-# no existe en psycopg).
-# 4. Ejecutar benchmark de inserción (desde la imagen seed, con volumen montado)
-docker compose run --rm -v "$($PWD.Path)/db:/work/db" -w /work -e PGDATABASE=bodegas_atuel_bench seed python -u /work/db/seed/benchmark_insercion.py
+```powershell
+docker compose run --rm -e PGDATABASE=bodegas_atuel_bench -e FECHA_REF_ISO=2027-01-01 seed python -u seed.py
+# (exit code: 1)
 ```
 
 **Quién ejecuta:** `DISABLE/ENABLE TRIGGER USER` exige ser dueño de la tabla (no superusuario; `ALL` sí exige superusuario). Se ejecuta con el rol propietario (`owner_bodegas`), nunca con `app_rw`.
 
 ## Qué está probado y qué no
 
-**Probado** (`db/test/carga_pruebas.sql`, dos corridas, 15 triggers en `O` al final):
+**Probado** (`db/test/carga_pruebas.sql`, dos corridas, 15 triggers en `O` al final; `db/test/test_semilla.py` con `freezegun`):
 * prueba negativa 4 de 5 `ENABLE` (bloque (b));
 * flujo completo sano con cero filas en todos los controles (bloque (c));
-* casos rotos: C5/C7/gate (bloque (d)), composición de vino, tipo de cliente, C9, C7 sin C5a, C6.
+* casos rotos: C5/C7/gate (bloque (d)), composición de vino, tipo de cliente, C9, C7 sin C5a, C6;
+* determinismo: 8 hashes MD5 idénticos entre dos corridas completas del seed;
+* test unitario de invarianza al reloj con `freezegun` (`db/test/test_semilla.py`).
 
 **No probado:**
-* `COMMIT` real del flujo de carga (solo `ROLLBACK` en las pruebas);
 * controles C8/C12/C13 con datos rotos;
-* `trg_permiso_u6_descuento`, `trg_vino_lote_bodega`, `trg_vino_auditoria`;
-* la carga masiva con `cargar.py`.
+* `trg_permiso_u6_descuento`, `trg_vino_lote_bodega`, `trg_vino_auditoria`.
 
 Aclaración: `C3` y `C4` no pueden fallar porque las FK y los `CHECK` siguen activos con `DISABLE TRIGGER USER` (solo se desactivan los triggers de usuario, no las restricciones nativas).
 
