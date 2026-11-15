@@ -1,6 +1,8 @@
 -- 02_controles.sql – Consultas de control después de la carga histórica
 -- (corregido: estados en minúscula según el enum estado_documento;
---  columnas reales del esquema; C7 y C8 con FULL OUTER JOIN)
+--  columnas reales del esquema; C7 y C8 con FULL OUTER JOIN y COALESCE;
+--  C9 con ventas como negativo y entradas primero en el mismo día;
+--  C2 con conteo de TODAS las tablas de public)
 
 -- C1: Triggers de usuario que no están habilitados
 SELECT c.relname, t.tgname, t.tgenabled
@@ -9,10 +11,37 @@ JOIN   pg_class c ON c.oid = t.tgrelid
 WHERE  NOT t.tgisinternal
   AND  t.tgenabled <> 'O';
 
--- C2: Conteo de filas por tabla principal (ejemplo)
-SELECT 'cliente' AS tabla, COUNT(*) FROM cliente UNION ALL
-SELECT 'vino', COUNT(*) FROM vino UNION ALL
-SELECT 'renglon_comprobante', COUNT(*) FROM renglon_comprobante;
+-- C2: Conteo de filas de TODAS las tablas de public
+SELECT 'analisis_calidad'      AS tabla, COUNT(*) FROM analisis_calidad      UNION ALL
+SELECT 'auditoria_precio'      AS tabla, COUNT(*) FROM auditoria_precio      UNION ALL
+SELECT 'bodega'                AS tabla, COUNT(*) FROM bodega                UNION ALL
+SELECT 'cepa'                  AS tabla, COUNT(*) FROM cepa                  UNION ALL
+SELECT 'cliente'               AS tabla, COUNT(*) FROM cliente               UNION ALL
+SELECT 'cliente_distribuidor'  AS tabla, COUNT(*) FROM cliente_distribuidor  UNION ALL
+SELECT 'cliente_exportador'    AS tabla, COUNT(*) FROM cliente_exportador    UNION ALL
+SELECT 'comprobante'           AS tabla, COUNT(*) FROM comprobante           UNION ALL
+SELECT 'departamento'          AS tabla, COUNT(*) FROM departamento          UNION ALL
+SELECT 'empleado'              AS tabla, COUNT(*) FROM empleado              UNION ALL
+SELECT 'finca'                 AS tabla, COUNT(*) FROM finca                 UNION ALL
+SELECT 'ingreso'               AS tabla, COUNT(*) FROM ingreso               UNION ALL
+SELECT 'localidad'             AS tabla, COUNT(*) FROM localidad             UNION ALL
+SELECT 'lote_uva'              AS tabla, COUNT(*) FROM lote_uva              UNION ALL
+SELECT 'maridaje'              AS tabla, COUNT(*) FROM maridaje              UNION ALL
+SELECT 'parcela'               AS tabla, COUNT(*) FROM parcela               UNION ALL
+SELECT 'permiso_exportacion'   AS tabla, COUNT(*) FROM permiso_exportacion   UNION ALL
+SELECT 'renglon_comprobante'   AS tabla, COUNT(*) FROM renglon_comprobante   UNION ALL
+SELECT 'renglon_ingreso'       AS tabla, COUNT(*) FROM renglon_ingreso       UNION ALL
+SELECT 'renglon_transferencia' AS tabla, COUNT(*) FROM renglon_transferencia UNION ALL
+SELECT 'sala_venta'            AS tabla, COUNT(*) FROM sala_venta            UNION ALL
+SELECT 'stock_deposito'        AS tabla, COUNT(*) FROM stock_deposito        UNION ALL
+SELECT 'stock_sala'            AS tabla, COUNT(*) FROM stock_sala            UNION ALL
+SELECT 'transferencia'         AS tabla, COUNT(*) FROM transferencia         UNION ALL
+SELECT 'transportista'         AS tabla, COUNT(*) FROM transportista         UNION ALL
+SELECT 'transportista_localidad' AS tabla, COUNT(*) FROM transportista_localidad UNION ALL
+SELECT 'vino'                  AS tabla, COUNT(*) FROM vino                  UNION ALL
+SELECT 'vino_cepa'             AS tabla, COUNT(*) FROM vino_cepa             UNION ALL
+SELECT 'vino_lote'             AS tabla, COUNT(*) FROM vino_lote             UNION ALL
+SELECT 'vino_maridaje'         AS tabla, COUNT(*) FROM vino_maridaje;
 
 -- C3: Filas huérfanas en relaciones principales (ejemplo: renglon_comprobante sin comprobante)
 SELECT rc.* FROM renglon_comprobante rc
@@ -23,17 +52,23 @@ WHERE c.nro_comprobante IS NULL;
 SELECT s.* FROM stock_sala s WHERE s.cantidad < 0;
 
 -- C5: Inconsistencias en totales de comprobantes y subtotales de renglones
--- 5a: Totales del comprobante
+-- 5a: Totales del comprobante.
+--     subtotal  = bruto = SUM(cantidad * precio_unitario)  (sin descuento)
+--     total     = neto  = fn_total_comprobante(nro)        (con descuento)
+--     fn_total_comprobante recibe nro_comprobante y devuelve
+--     SUM(ROUND(cantidad * precio_unitario * (100 - descuento_pct) / 100, 2))
+-- 5b: Subtotales de renglones
 SELECT c.* FROM comprobante c
 WHERE c.subtotal <> (
   SELECT COALESCE(SUM(rc.cantidad * rc.precio_unitario),0)
   FROM renglon_comprobante rc WHERE rc.nro_comprobante = c.nro_comprobante
 ) OR c.total <> fn_total_comprobante(c.nro_comprobante);
--- 5b: Subtotales de renglones
 SELECT rc.* FROM renglon_comprobante rc
 WHERE rc.subtotal <> ROUND(rc.cantidad * rc.precio_unitario * (100 - rc.descuento_pct)/100,2);
 
 -- C6: Descuento_pct diferente al calculado por fn_descuento_cliente
+-- fn_descuento_cliente recibe id_cliente (INTEGER), no tipo_cliente.
+-- Devuelve: socio=10, distribuidor=20, exportador=porcentaje_descuento.
 SELECT rc.* FROM renglon_comprobante rc
 JOIN comprobante co ON co.nro_comprobante = rc.nro_comprobante
 JOIN cliente cl ON cl.id_cliente = co.id_cliente
@@ -42,6 +77,7 @@ WHERE rc.descuento_pct <> fn_descuento_cliente(cl.id_cliente);
 -- C7: Conservación del stock de sala (stock inicial 0).
 -- esperado = transferencias_procesadas_entran - ventas_comprobante_salen, por (id_sala, cod_vino).
 -- FULL OUTER JOIN contra stock_sala para detectar pares con movimiento y sin fila de stock.
+-- COALESCE en ambos lados de IS DISTINCT FROM para no marcar pares sin movimiento ni fila.
 WITH mov_entr AS (
   SELECT tr.id_sala AS id_sala, rt.cod_vino AS cod_vino, SUM(rt.cantidad) AS entran
   FROM transferencia tr
@@ -65,11 +101,12 @@ calc AS (
 SELECT ss.id_sala, ss.cod_vino, ss.cantidad AS real, c.esperado
 FROM stock_sala ss
 FULL OUTER JOIN calc c ON c.id_sala = ss.id_sala AND c.cod_vino = ss.cod_vino
-WHERE ss.cantidad IS DISTINCT FROM c.esperado;
+WHERE COALESCE(ss.cantidad, 0) IS DISTINCT FROM COALESCE(c.esperado, 0);
 
 -- C8: Conservación del depósito (por vino).
 -- esperado = ingresos_procesados_entran - transferencias_procesadas_salen.
 -- FULL OUTER JOIN contra stock_deposito.
+-- COALESCE en ambos lados de IS DISTINCT FROM.
 WITH mov_ing AS (
   SELECT ri.cod_vino AS cod_vino, SUM(ri.cantidad) AS entran
   FROM ingreso i
@@ -93,20 +130,32 @@ calc AS (
 SELECT sd.cod_vino, sd.cantidad AS real, c.esperado
 FROM stock_deposito sd
 FULL OUTER JOIN calc c ON c.cod_vino = sd.cod_vino
-WHERE sd.cantidad IS DISTINCT FROM c.esperado;
+WHERE COALESCE(sd.cantidad, 0) IS DISTINCT FROM COALESCE(c.esperado, 0);
 
 -- C9: Stock acumulado que alguna vez queda negativo (ventana, por sala).
--- ingreso no tiene id_sala (su stock va al depósito), por lo que solo
--- transferencia puede particionarse por sala.
+-- Transferencias procesadas SUMAN (entran a la sala, positivo).
+-- Ventas (comprobantes) RESTAN (salen de la sala, negativo).
+-- Ordenadas por fecha, con las entradas primero en el mismo día.
+-- Devuelve las filas con acumulado < 0.
 WITH movimiento AS (
+  -- Transferencias: entran (positivo)
   SELECT tr.id_sala, rt.cod_vino, tr.fecha_confeccion AS fecha, rt.cantidad
   FROM transferencia tr
   JOIN renglon_transferencia rt ON rt.nro_transferencia = tr.nro_transferencia
   WHERE tr.estado = 'procesado'
+  UNION ALL
+  -- Ventas: salen (negativo)
+  SELECT c.id_sala, rc.cod_vino, c.fecha AS fecha, -rc.cantidad
+  FROM comprobante c
+  JOIN renglon_comprobante rc ON rc.nro_comprobante = c.nro_comprobante
 ),
 acumulado AS (
   SELECT id_sala, cod_vino, fecha, cantidad,
-         SUM(cantidad) OVER (PARTITION BY id_sala, cod_vino ORDER BY fecha ROWS UNBOUNDED PRECEDING) AS acumulado
+         SUM(cantidad) OVER (
+           PARTITION BY id_sala, cod_vino
+           ORDER BY fecha, CASE WHEN cantidad > 0 THEN 0 ELSE 1 END
+           ROWS UNBOUNDED PRECEDING
+         ) AS acumulado
   FROM movimiento
 )
 SELECT * FROM acumulado WHERE acumulado < 0;

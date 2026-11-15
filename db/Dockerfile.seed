@@ -7,12 +7,13 @@
 # aporten los integrantes de db/seed/.
 # =====================================================================
 
-FROM python:3-slim
-
-# Dependencias del script de carga (psycopg v3 + Faker) con versiones fijas y estables
-RUN pip install --no-cache-dir "psycopg[binary]==3.2.2" "faker==21.2.0"
+FROM python:3.15-slim
 
 WORKDIR /seed
+
+# Dependencias del script de carga (psycopg v3 + Faker)
+COPY db/seed/requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
 
 # CSV del catalogo y script de carga (aportados por otros integrantes)
 COPY db/seed/ ./

@@ -29,7 +29,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-bodegas_atuel}
     ports:
       # Puerto expuesto en el host; configurable por si el 5432 está ocupado
-      - "${DB_PORT:-5432}:5432"
+      - "${DB_PORT:-5433}:5432"
     volumes:
       # Volumen con nombre para persistir los datos de la base
       - pgdata:/var/lib/postgresql/data
