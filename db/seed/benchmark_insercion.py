@@ -4,14 +4,14 @@ renglon_comprobante SIN claves foráneas, por lo que no necesita datos de
 referencia).
 
 Métodos:
-  A - fila por fila con COMMIT por fila                      (N=2000)
-  B - fila por fila en una única transacción                 (N=10000)
-  C - cur.executemany                                        (N=10000)
-  D - INSERT multi-fila por lotes de 1000                    (N=10000 y 100000)
-  E - COPY (cursor.copy)                                     (N=10000 y 100000)
+  A - fila por fila con COMMIT por fila                      (N=5000)
+  B - fila por fila en una única transacción                 (N=5000)
+  C - cur.executemany                                        (N=5000)
+  D - INSERT multi-fila por lotes de 1000                    (N=5000)
+  E - COPY (cursor.copy)                                     (N=5000)
 
-Una calentamiento + 3 repeticiones por configuración; se reporta mediana y
-filas/segundo.
+Una calentamiento (N=500, todos los métodos) + 3 repeticiones por
+configuración; se reporta mediana y filas/segundo.
 
 Conexión mediante variables de entorno PG* (PGDATABASE, PGUSER, PGHOST,
 PGPORT, PGPASSWORD). Dentro del contenedor bodegas-db se usa el socket local
@@ -31,7 +31,8 @@ PORT = os.environ.get("PGPORT")
 PASSWORD = os.environ.get("PGPASSWORD")
 
 REPS = 3
-WARMUP_N = 2000
+WARMUP_N = 500
+MEDIDA_N = 5000
 
 COLUMNS = ["nro_comprobante", "cod_vino", "cantidad", "precio_unitario",
            "descuento_pct", "subtotal"]
@@ -294,17 +295,19 @@ def main():
             create_bench_table(cur)
             con.commit()
 
-        print("== Calentamiento (method A, N=2000, se descarta) ==")
+        print("== Calentamiento (N=500, todos los métodos, se descarta) ==")
         method_a(con, WARMUP_N)
+        method_b(con, WARMUP_N)
+        method_c(con, WARMUP_N)
+        method_d(con, WARMUP_N)
+        method_e(con, WARMUP_N)
 
         print("\n== Medición (3 repeticiones, mediana + filas/s) ==")
-        results.append(run("A  fila x fila + commit x fila", method_a, con, 2000))
-        results.append(run("B  fila x fila, 1 transacción", method_b, con, 10000))
-        results.append(run("C  executemany", method_c, con, 10000))
-        results.append(run("D  INSERT multi-fila lotes 1000", method_d, con, 10000))
-        results.append(run("E  COPY", method_e, con, 10000))
-        results.append(run("D  INSERT multi-fila lotes 1000", method_d, con, 100000))
-        results.append(run("E  COPY", method_e, con, 100000))
+        results.append(run("A  fila x fila + commit x fila", method_a, con, MEDIDA_N))
+        results.append(run("B  fila x fila, 1 transacción", method_b, con, MEDIDA_N))
+        results.append(run("C  executemany", method_c, con, MEDIDA_N))
+        results.append(run("D  INSERT multi-fila lotes 1000", method_d, con, MEDIDA_N))
+        results.append(run("E  COPY", method_e, con, MEDIDA_N))
 
         optional_trigger_cost(con)
 

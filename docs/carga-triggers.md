@@ -86,28 +86,27 @@ se ejecutan inmediatamente por fila, no al COMMIT.
 
 ## 4. Resultados reales de la medición (benchmark)
 
-*Los tiempos a continuación fueron obtenidos ejecutando `benchmark_insercion.py` contra la base `bodegas_atuel_bench`. Mediana de 3 repeticiones; `× más rápido que A` = filas/s dividido entre 91 (filas/s de A). Medido desde el contenedor `seed` por la red bridge de Docker Desktop en Windows. A se midió con N=2000 y el resto con N distinto, por lo que se comparan filas/s y no segundos.*
+*Los tiempos a continuación fueron obtenidos ejecutando `benchmark_insercion.py` contra la base `bodegas_atuel_test`. Mediana de 3 repeticiones (tras calentamiento N=500 en todos los métodos); `× vs A` = filas/s dividido entre 157 (filas/s de A en Corrida 1). Medido desde el contenedor `seed` por la red bridge de Docker Desktop en Windows. Todos los métodos midieron con N=5000, por lo que se comparan filas/s y segundos directamente.*
 
-| Método | N (filas) | Segundos (medida mediana) | Filas/seg | × más rápido que A |
+| Método | N (filas) | Segundos (medida mediana) | Filas/seg | × vs A |
 |---|---|---|---|---|
-| A – fila por fila con COMMIT por fila | 2000 | 21.90 | 91 | 1x |
-| B – fila por fila en una transacción única | 10000 | 17.81 | 561 | ≈6x |
-| C – `executemany` | 10000 | 2.54 | 3944 | ≈43x |
-| D – INSERT multi‑fila (lotes de 1000) | 10000 | 0.85 | 11821 | ≈130x |
-| E – `COPY` | 10000 | 0.32 | 30840 | ≈340x |
-| D – INSERT multi‑fila (lotes de 1000) | 100000 | 6.38 | 15679 | ≈170x |
-| E – `COPY` | 100000 | 1.78 | 56235 | ≈620x |
+| A – fila por fila con COMMIT por fila | 5000 | 31.8337 | 157 | 1x |
+| B – fila por fila en una transacción única | 5000 | 4.3409 | 1,152 | ≈7x |
+| C – `executemany` | 5000 | 1.0176 | 4,913 | ≈31x |
+| D – INSERT multi‑fila (lotes de 1000) | 5000 | 0.2258 | 22,139 | ≈141x |
+| E – `COPY` | 5000 | 0.1506 | 33,208 | ≈212x |
 
 **Costo de los triggers sobre `renglon_comprobante` real (N=500, una medición):**
-* Triggers ON: 1.726 s (290 filas/s)
-* Triggers OFF: 0.1495 s (3344 filas/s)
-* Cociente ON/OFF: 11.5x
+* Triggers ON: 0.6977 s (717 filas/s)
+* Triggers OFF: 0.1255 s (3,984 filas/s)
+* Cociente ON/OFF: 5.56x
 
 >Aclaraciones:
-* Hay **dispersión alta entre repeticiones** (B varía de 10.3 s a 32.8 s; D 10k varía de 0.42 s a 2.59 s). Las razones arriba son **indicativas**, no definitivas.
+* Hay **dispersión alta entre repeticiones**. Las razones arriba son **indicativas**, no definitivas.
 * `bench_renglon` es una réplica estructural de `renglon_comprobante` **sin FKs ni triggers**, por lo que **sobreestima** la velocidad frente a la tabla real.
-* El cociente 11.5x refleja el trabajo adicional (cálculo de stock y totales fila por fila) que el cargador debe reemplazar con SQL por conjuntos cuando los triggers están deshabilitados.
+* El cociente ON/OFF refleja el trabajo adicional (cálculo de stock y totales fila por fila) que el cargador debe reemplazar con SQL por conjuntos cuando los triggers están deshabilitados.
 * Una sola medición ON/OFF: **indicativa**, no estadísticamente rigurosa.
+* ON se mide primero, luego OFF (sin alternar). Ambos dentro de la misma transacción con ROLLBACK final.
 
 ## 5. Ejecución completa (PowerShell)
 
