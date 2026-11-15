@@ -15,15 +15,18 @@ Flujo (según consigna Etapa 3):
      bodega) y datos maestros con Faker (seed 1234).
   4. Genera stock suficiente (depósito + salas) para evitar ventas con stock
      negativo (RN-09).
-  5. Inserta comprobantes y renglones masivamente con COPY (método más rápido
+  5. Inserta movimientos de stock (ingresos/transferencias) que justifican el
+     stock inicial (para C7/C8).
+  6. Inserta movimientos recientes con estados mixtos para poblar S4, S5, S7 e I1.
+  7. Inserta comprobantes y renglones masivamente con COPY (método más rápido
      del benchmark).
-  6. Recalcula totales de comprobante (quedaron en 0 mientras triggers
+  8. Recalcula totales de comprobante (quedaron en 0 mientras triggers
      deshabilitados) para que C5 de 02_controles.sql devuelva 0 filas.
-  7. Ejecuta 03_post_carga.sql (habilita triggers, valida tgenabled='O', setval
+  9. Ejecuta 03_post_carga.sql (habilita triggers, valida tgenabled='O', setval
      de secuencias IDENTITY, REFRESH MATERIALIZED VIEW, ANALYZE).
-  8. SET CONSTRAINTS ALL IMMEDIATE (forza ctg_* diferidos).
-  9. Ejecuta 02b_gate.sql (gate de integridad; aborta si algún control devuelve filas).
- 10. COMMIT único al final.
+ 10. SET CONSTRAINTS ALL IMMEDIATE (forza ctg_* diferidos).
+ 11. Ejecuta 02b_gate.sql (gate de integridad; aborta si algún control devuelve filas).
+ 12. COMMIT único al final.
 
 Variables de entorno: PGDATABASE, PGUSER, PGHOST, PGPORT, PGPASSWORD.
 Dentro del contenedor bodegas-db se usa el socket local (trust).
@@ -74,9 +77,11 @@ RUTA_GATE = os.path.join(SQL_DIR, "02b_gate.sql")
 N_FINCAS = 8
 N_PARCELAS_POR_FINCA = 3
 N_VINOS = 40
-N_CLIENTES = 200
+N_CLIENTES = 20000
+N_CLIENTES_SIN_COMPRAS = 500
 N_SALAS = 15
 N_TRANSPORTISTAS = 6
+N_EMPLEADOS = 150
 N_COMPROBANTES = 170000          # > 150.000 (TPI)
 MIN_RENGLONES_X_COMPROBANTE = 3
 MAX_RENGLONES_X_COMPROBANTE = 5
@@ -247,12 +252,30 @@ def insertar_maestros(con):
 
 
 def insertar_clientes(con):
-    """Clientes con subtipos y permisos de exportación (determinan descuento 30/35)."""
+    """Clientes con subtipos y permisos de exportación (determinan descuento 30/35).
+
+    nro_documento es secuencial y deterministico (str(20000000 + i)) para evitar
+    colisiones en uq_cliente_documento (tipo_documento, nro_documento).
+    Los clientes con id > N_CLIENTES - N_CLIENTES_SIN_COMPRAS son socios sin compras;
+    50 de ellos usan el codigo postal de General Alvear (5505).
+    """
+    codigos_postales = ["5500", "5505", "5561", "5565", "5515", "5530",
+                        "5507", "5550", "5562", "5509"]
+    codigo_postal_general_alvear = "5505"
+    id_limite_sin_compras = N_CLIENTES - N_CLIENTES_SIN_COMPRAS
     with con.cursor() as cur:
-        codigos_postales = ["5500", "5505", "5561", "5565", "5515", "5530",
-                            "5507", "5550", "5562", "5509"]
         for i in range(1, N_CLIENTES + 1):
-            tipo = random.choice(["socio", "distribuidor", "exportador"])
+            if i > id_limite_sin_compras:
+                # Socios sin compras (los últimos N_CLIENTES_SIN_COMPRAS)
+                tipo = "socio"
+            else:
+                tipo = random.choice(["socio", "distribuidor", "exportador"])
+            nro_documento = str(20000000 + i)  # 8 dígitos, cabe en varchar(11)
+            if i > id_limite_sin_compras and (i - id_limite_sin_compras) <= 50:
+                # 50 socios sin compras con codigo postal de General Alvear
+                codigo_postal = codigo_postal_general_alvear
+            else:
+                codigo_postal = random.choice(codigos_postales)
             cur.execute(
                 "INSERT INTO cliente (id_cliente, apellido_razon_social, nombre, "
                 "tipo_documento, nro_documento, direccion, codigo_postal, "
@@ -262,8 +285,8 @@ def insertar_clientes(con):
                 (
                     i, fake.last_name(), fake.first_name(),
                     random.choice(["DNI", "CUIT", "CUIL", "PASAPORTE"]),
-                    f"{random.randint(10000000, 99999999)}",
-                    fake.street_address(), random.choice(codigos_postales),
+                    nro_documento,
+                    fake.street_address(), codigo_postal,
                     date.fromordinal(random.randint(F_ALTA_DESDE.toordinal(), F_ALTA_HASTA.toordinal())),
                     tipo,
                 ),
@@ -323,6 +346,83 @@ def insertar_salas_y_transportistas(con):
                 "INSERT INTO transportista_localidad (cod_transportista, codigo_postal) "
                 "VALUES (%s, %s)", (i, random.choice(codigos_postales)),
             )
+        # Cobertura de General Alvear (5505) para transportista 1 sin duplicar PK
+        cur.execute(
+            "INSERT INTO transportista_localidad (cod_transportista, codigo_postal) "
+            "VALUES (1, '5505') "
+            "ON CONFLICT (cod_transportista, codigo_postal) DO NOTHING"
+        )
+
+
+def insertar_empleados(con, salas):
+    """Inserta N_EMPLEADOS empleados repartidos en orden entre las salas.
+
+    cuit deterministico de 11 digitos ("20" + 8 digitos secuenciales + dígito de control).
+    fecha_ingreso entre FECHA_REF - 8 años y FECHA_REF - 6 meses (empleados con mas
+    de 5 años y con menos de 2 años, necesarios para consignas U2 y D3).
+    salario entre 700000 y 2500000 con 2 decimales.
+    """
+    with con.cursor() as cur:
+        for i in range(1, N_EMPLEADOS + 1):
+            id_sala = salas[(i - 1) % len(salas)]
+            # cuit: "20" + 8 digitos secuenciales + digito de control (para cumplir cuit_dom: 11 digitos)
+            cuit = f"20{(i-1):08d}{i % 10}"
+            # fecha_ingreso entre FECHA_REF - 8 años y FECHA_REF - 6 meses
+            desde_ordinal = (FECHA_REF - timedelta(days=8 * 365)).toordinal()
+            hasta_ordinal = (FECHA_REF - timedelta(days=6 * 30)).toordinal()
+            fecha_ingreso = date.fromordinal(
+                random.randint(desde_ordinal, hasta_ordinal)
+            )
+            salario = round(random.uniform(700000, 2500000), 2)
+            cur.execute(
+                "INSERT INTO empleado (cuit, nombre, fecha_ingreso, salario, id_sala) "
+                "OVERRIDING SYSTEM VALUE VALUES (%s, %s, %s, %s, %s)",
+                (cuit, f"Empleado {i}", fecha_ingreso, salario, id_sala),
+            )
+
+
+def insertar_analisis(con):
+    """Inserta 2 analisis de calidad por cada lote_uva.
+
+    fecha entre fecha_cosecha del lote y F_INGRESO.
+    brix entre 18 y 26, ph entre 3.1 y 3.8, acidez_total entre 4 y 8.
+    Respeta PK compuesta (id_lote, fecha, hora) y FK a lote_uva.
+    """
+    with con.cursor() as cur:
+        cur.execute(
+            "SELECT id_lote, fecha_cosecha FROM lote_uva ORDER BY id_lote"
+        )
+        lotes = cur.fetchall()
+        for id_lote, fecha_cosecha in lotes:
+            desde_ordinal = fecha_cosecha.toordinal()
+            hasta_ordinal = F_INGRESO.toordinal()
+            for k in range(2):
+                fecha = date.fromordinal(random.randint(desde_ordinal, hasta_ordinal))
+                hora = f"{random.randint(6, 18):02d}:{random.randint(0, 59):02d}:{random.randint(0, 59):02d}"
+                brix = round(random.uniform(18, 26), 2)
+                ph = round(random.uniform(3.1, 3.8), 2)
+                acidez_total = round(random.uniform(4, 8), 2)
+                cur.execute(
+                    "INSERT INTO analisis_calidad (id_lote, fecha, hora, brix, ph, acidez_total) "
+                    "VALUES (%s, %s, %s, %s, %s, %s)",
+                    (id_lote, fecha, hora, brix, ph, acidez_total),
+                )
+
+
+def insertar_cambios_precio(con):
+    """Aplica un aumento del 5% al precio de los primeros 5 vinos.
+
+    El trigger trg_vino_auditoria esta ACTIVO (no lo apaga 01_pre_carga), por lo que
+    cada INSERT/UPDATE en auditoria_precio se registra. auditoria_precio.fecha_hora
+    usa DEFAULT now() y usuario usa DEFAULT current_user, por lo que esta tabla no
+    es determinista y queda excluida de los hashes de determinismo.
+    Debe ejecutarse ANTES de calcular precio_por_vino para que las ventas usen
+    el precio vigente actualizado.
+    """
+    with con.cursor() as cur:
+        cur.execute(
+            "UPDATE vino SET precio = ROUND(precio * 1.05, 2) WHERE cod_vino <= 5"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -400,6 +500,130 @@ def poblar_movimientos_stock(con, vinos, salas, bodega_cuits):
           f"{len(salas)*len(vinos)} transferencias en {dt:.3f}s")
 
 
+def poblar_movimientos_recientes(con, vinos, salas, bodega_cuits):
+    """Ingresos y transferencias recientes con estados mixtos para poblar S4, S5, S7 e I1.
+
+    Usa rng = random.Random(4321) propio para no alterar la secuencia del random global.
+    Corre DESPUES de poblar_movimientos_stock y ANTES de generar_ventas.
+    """
+    rng = random.Random(4321)
+    t0 = time.perf_counter()
+
+    # ---------------- 40 ingresos recientes ----------------
+    # Estados: 50% procesado, 25% terminado, 25% en_confeccion
+    estados_ingreso = ['procesado'] * 20 + ['terminado'] * 10 + ['en_confeccion'] * 10
+    # Transportistas ponderados: 1 tiene muchos, 6 tiene pocos
+    transportistas_ponderados = [1] * 20 + [2] * 8 + [3] * 5 + [4] * 4 + [5] * 2 + [6] * 1
+
+    desde_ordinal = (FECHA_REF - timedelta(days=90)).toordinal()
+    hasta_ordinal = FECHA_REF.toordinal()
+
+    cod_ingreso_base = len(vinos) + 1
+    for i in range(40):
+        cod_ingreso = cod_ingreso_base + i
+        fecha = date.fromordinal(rng.randint(desde_ordinal, hasta_ordinal))
+        estado = estados_ingreso[i % len(estados_ingreso)]
+        cod_transportista = rng.choice(transportistas_ponderados)
+        cuit_bodega = bodega_cuits[i % len(bodega_cuits)]
+
+        cur = con.cursor()
+        cur.execute(
+            "INSERT INTO ingreso (cod_ingreso, fecha, estado, cod_transportista, "
+            "cuit_bodega) OVERRIDING SYSTEM VALUE VALUES (%s, %s, %s, %s, %s)",
+            (cod_ingreso, fecha, estado, cod_transportista, cuit_bodega),
+        )
+
+        # 2 renglones de vinos distintos, cantidad entre 100 y 500
+        vinos_elegidos = rng.sample(vinos, 2)
+        for cod_vino in vinos_elegidos:
+            cantidad = rng.randint(100, 500)
+            cur.execute(
+                "INSERT INTO renglon_ingreso (cod_ingreso, cod_vino, cantidad) "
+                "VALUES (%s, %s, %s)",
+                (cod_ingreso, cod_vino, cantidad),
+            )
+
+        # Solo para procesado: sumar a stock_deposito
+        if estado == 'procesado':
+            for cod_vino in vinos_elegidos:
+                # Re-leer cantidad de este ingreso para este vino
+                cur.execute(
+                    "SELECT cantidad FROM renglon_ingreso WHERE cod_ingreso = %s AND cod_vino = %s",
+                    (cod_ingreso, cod_vino),
+                )
+                cant_ing = cur.fetchone()[0]
+                cur.execute(
+                    "UPDATE stock_deposito SET cantidad = cantidad + %s WHERE cod_vino = %s",
+                    (cant_ing, cod_vino),
+                )
+        cur.close()
+
+    # ---------------- 120 transferencias recientes ----------------
+    # Estados: 50% procesado, 25% terminado, 25% en_confeccion
+    estados_transferencia = ['procesado'] * 60 + ['terminado'] * 30 + ['en_confeccion'] * 30
+
+    desde_ordinal_t = (FECHA_REF - timedelta(days=30)).toordinal()
+    hasta_ordinal_t = FECHA_REF.toordinal()
+
+    # Obtener nro_transferencia maximo existente
+    cur = con.cursor()
+    cur.execute("SELECT COALESCE(MAX(nro_transferencia), 0) FROM transferencia")
+    nro_transferencia_base = cur.fetchone()[0]
+
+    for i in range(120):
+        nro_transferencia = nro_transferencia_base + 1 + i
+        fecha = date.fromordinal(rng.randint(desde_ordinal_t, hasta_ordinal_t))
+        estado = estados_transferencia[i % len(estados_transferencia)]
+        id_sala = rng.choice(salas)
+
+        cur.execute(
+            "INSERT INTO transferencia (nro_transferencia, id_sala, fecha_confeccion, "
+            "estado) OVERRIDING SYSTEM VALUE VALUES (%s, %s, %s, %s)",
+            (nro_transferencia, id_sala, fecha, estado),
+        )
+
+        # 2 renglones de vinos distintos, cantidad entre 10 y 100
+        vinos_elegidos = rng.sample(vinos, 2)
+        for cod_vino in vinos_elegidos:
+            cantidad = rng.randint(10, 100)
+            cur.execute(
+                "INSERT INTO renglon_transferencia (nro_transferencia, cod_vino, cantidad) "
+                "VALUES (%s, %s, %s)",
+                (nro_transferencia, cod_vino, cantidad),
+            )
+
+            # Solo para procesado: ajustar stock_deposito y stock_sala
+            if estado == 'procesado':
+                # Consultar stock_deposito disponible para este vino
+                cur.execute(
+                    "SELECT cantidad FROM stock_deposito WHERE cod_vino = %s",
+                    (cod_vino,),
+                )
+                fila = cur.fetchone()
+                disp = fila[0] if fila else 0
+                if disp <= 0:
+                    # Saltar este renglon: no hay stock en deposito
+                    continue
+                cant = cantidad
+                if cant > disp:
+                    cant = disp
+                # Restar de stock_deposito
+                cur.execute(
+                    "UPDATE stock_deposito SET cantidad = cantidad - %s WHERE cod_vino = %s",
+                    (cant, cod_vino),
+                )
+                # Sumar a stock_sala del par (id_sala, cod_vino)
+                cur.execute(
+                    "UPDATE stock_sala SET cantidad = cantidad + %s "
+                    "WHERE id_sala = %s AND cod_vino = %s",
+                    (cant, id_sala, cod_vino),
+                )
+    cur.close()
+
+    dt = time.perf_counter() - t0
+    print(f"[OK] Movimientos recientes: 40 ingresos, 120 transferencias en {dt:.3f}s")
+
+
 # ---------------------------------------------------------------------------
 # Ventas masivas: comprobantes + renglones con COPY
 # ---------------------------------------------------------------------------
@@ -447,7 +671,7 @@ def generar_ventas(con, salas, stock_sala_disp, vinos, precio_por_vino,
 
     for i in range(1, N_COMPROBANTES + 1):
         nro = nro_base + i
-        id_cliente = random.randint(1, N_CLIENTES)
+        id_cliente = random.randint(1, N_CLIENTES - N_CLIENTES_SIN_COMPRAS)
         id_sala = random.choice(salas)
         fecha_comp = fechas[i - 1]
         desc_pct = descuento_por_cliente.get(id_cliente, 10)
@@ -577,6 +801,13 @@ def main():
         print(f"  clientes ({N_CLIENTES}) + subtipos + permisos exportación: OK")
         insertar_salas_y_transportistas(con)
         print(f"  salas ({N_SALAS}) + transportistas ({N_TRANSPORTISTAS}): OK")
+        insertar_analisis(con)
+        print(f"  analisis_calidad: OK")
+
+        # Insertar cambios de precio (trigger auditoria_precio activo) ANTES de
+        # leer los precios vigentes para las ventas.
+        insertar_cambios_precio(con)
+        print("  cambios de precio (auditoria_precio): OK")
 
         # 4) IDs para ventas
         with con.cursor() as cur:
@@ -593,6 +824,10 @@ def main():
             print("ERROR: No hay vinos o salas para ventas.", file=sys.stderr)
             sys.exit(1)
 
+        # Empleados (se insertan despues de que salas esta definida)
+        insertar_empleados(con, salas)
+        print(f"  empleados ({N_EMPLEADOS}): OK")
+
         # 5) Stock (depósito + salas), persistido en DB
         print("\n=== Poblado de stock (depósito y salas) ===")
         stock_deposito, stock_sala_disp = poblar_stock(con, vinos, salas)
@@ -601,29 +836,39 @@ def main():
         print("\n=== Movimientos de stock (ingresos/transferencias) ===")
         poblar_movimientos_stock(con, vinos, salas, bodega_cuits)
 
-        # 7) Descuentos por cliente
+        # 7) Movimientos recientes (estados mixtos) para poblar S4, S5, S7 e I1
+        print("\n=== Movimientos recientes (estados mixtos) ===")
+        poblar_movimientos_recientes(con, vinos, salas, bodega_cuits)
+
+        # Sincronizar stock_sala_disp con los cambios de transferencias recientes
+        # (se re-leye desde la BD para reflejar aumentos de stock_sala)
+        with con.cursor() as cur:
+            cur.execute("SELECT id_sala, cod_vino, cantidad FROM stock_sala")
+            stock_sala_disp = {(r[0], r[1]): r[2] for r in cur.fetchall()}
+
+        # 8) Descuentos por cliente
         descuento_por_cliente = descuento_por_cliente_map(con)
 
-        # 8) Ventas masivas
+        # 9) Ventas masivas
         print("\n=== Ventas masivas (comprobantes + renglones) ===")
         generar_ventas(con, salas, stock_sala_disp, vinos, precio_por_vino,
                        descuento_por_cliente)
 
-        # 9) Recalcular totales de comprobante (antes de 03_post_carga para que
+        # 10) Recalcular totales de comprobante (antes de 03_post_carga para que
         #    la vista materializada se refleje con totales correctos)
         print("\n=== Recalcular totales de comprobante ===")
         recalcular_totales_comprobante(con)
 
-        # 10) 03_post_carga
+        # 11) 03_post_carga
         print("\n=== 03_post_carga: habilitando triggers y validando ===")
         ejecutar_sql_archivo(con, RUTA_03, "03_post_carga")
 
-        # 11) Forzar constraint triggers diferidos antes del gate
+        # 12) Forzar constraint triggers diferidos antes del gate
         print("\n=== SET CONSTRAINTS ALL IMMEDIATE ===")
         with con.cursor() as cur:
             cur.execute("SET CONSTRAINTS ALL IMMEDIATE")
 
-        # 12) Gate de integridad
+        # 13) Gate de integridad
         print("\n=== 02b_gate: validación de controles ===")
         ejecutar_sql_archivo(con, RUTA_GATE, "02b_gate")
 

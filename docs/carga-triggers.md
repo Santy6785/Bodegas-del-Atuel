@@ -120,8 +120,8 @@ docker compose run --rm -e PGDATABASE=bodegas_atuel_bench seed python -u seed.py
 ```
 
 Datos reales de la ejecución:
-* Carga **170000** comprobantes y **680046** renglones en unos **97 s**.
-* El gate `02b_gate.sql` tarda unos **31 s**.
+* Carga **170000** comprobantes y **680366** renglones en unos **244 s** (versión con 20000 clientes y 150 empleados).
+* El gate `02b_gate.sql` tarda unos **37 s** (versión base de 200 clientes: **97 s**).
 * Si el gate falla, `seed.py` ejecuta `ROLLBACK` y los **15 triggers** quedan intactos en `'O'`.
 * Prueba de camino de error: con `-e FECHA_REF_ISO=2027-01-01` aborta en **C13a** (`Fallo en control C13a`) con **exit code 1**.
 
@@ -138,7 +138,7 @@ docker compose run --rm -e PGDATABASE=bodegas_atuel_bench -e FECHA_REF_ISO=2027-
 * prueba negativa 4 de 5 `ENABLE` (bloque (b));
 * flujo completo sano con cero filas en todos los controles (bloque (c));
 * casos rotos: C5/C7/gate (bloque (d)), composición de vino, tipo de cliente, C9, C7 sin C5a, C6;
-* determinismo: 8 hashes MD5 idénticos entre dos corridas completas del seed;
+* determinismo: 11 tablas (`cliente`, `empleado`, `analisis_calidad`, `vino`, `lote_uva`, `ingreso`, `transferencia`, `stock_sala`, `stock_deposito`, `comprobante`, `renglon_comprobante`) con hashes MD5 idénticos entre dos corridas completas del seed (excluyendo `auditoria_precio` porque usa `DEFAULT now()` y `current_user`, por lo que no es determinista);
 * test unitario de invarianza al reloj con `freezegun` (`db/test/test_semilla.py`).
 
 **No probado:**
