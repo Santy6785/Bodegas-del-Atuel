@@ -155,7 +155,13 @@ pytest -m "not integration"
 ```
 
 ### Pruebas de Integración (con base de datos PostgreSQL 16 activa):
+La suite utiliza siempre la base de pruebas `bodegas_atuel_test`, que se recrea desde cero al iniciar la sesión de pytest (`DROP DATABASE IF EXISTS ...` + `CREATE DATABASE`), por lo que nunca se toca la base de desarrollo `bodegas_atuel`.
+
 Asegúrese de contar con el contenedor `db` activo y las migraciones aplicadas:
+
+- En Windows, es necesario **Git Bash** (el `conftest` ejecuta `scripts/migrate.sh` a través de `C:\Program Files\Git\bin\bash.exe`).
+- Defina la variable de entorno `POSTGRES_PASSWORD` (sin valor por defecto; si falta, los tests de integración se saltan con `pytest.skip`).
+
 ```bash
 # Desde la carpeta api/
 cd api

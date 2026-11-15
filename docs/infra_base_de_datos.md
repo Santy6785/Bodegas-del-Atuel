@@ -209,3 +209,34 @@ Resultados obtenidos tras aplicar secuencialmente `001_esquema.sql` y `002_const
 | **FOREIGN KEY (`f`)** | **36** | Integridad referencial con acciones `ON DELETE` / `ON UPDATE` según RN. |
 | **CHECK (`c`)** | **21** | Reglas de negocio sobre montos, porcentajes, saldos y rangos válidos. |
 | **UNIQUE (`u`)** | **9** | Restricciones de unicidad para claves alternativas de negocio. |
+
+---
+
+## 🧪 Ejecutar la Suite de Pruebas (pytest)
+
+La suite de pruebas de la API se ejecuta con `pytest` desde la carpeta `api/`:
+
+```bash
+cd api
+```
+
+### Pruebas unitarias (sin base de datos)
+
+```bash
+pytest -m "not integration"
+```
+
+### Pruebas de integración (con base de datos PostgreSQL activa)
+
+La suite de integración usa siempre la base de pruebas **`bodegas_atuel_test`**, que se recrea desde cero al iniciar la sesión de pytest (`DROP DATABASE IF EXISTS ...` + `CREATE DATABASE`), por lo que nunca se toca la base de desarrollo `bodegas_atuel`.
+
+Requisitos previos:
+- Contenedor `db` activo (`docker compose up -d`) y migraciones aplicadas.
+- Variable de entorno `POSTGRES_PASSWORD` definida (sin valor por defecto; si falta, los tests de integración se saltan con `pytest.skip`).
+- En **Windows**, es necesario **Git Bash** (el `conftest` ejecuta `scripts/migrate.sh` a través de `C:\Program Files\Git\bin\bash.exe`).
+
+```bash
+pytest -m integration -v
+```
+
+Si la base de datos no es alcanzable o no hay credenciales configuradas, los tests de integración se saltan automáticamente indicando la razón.

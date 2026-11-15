@@ -18,6 +18,7 @@ from app.main import app
 
 TEST_DB = "bodegas_atuel_test"
 RAIZ = pathlib.Path(__file__).resolve().parents[2]
+GIT_BASH = r"C:\Program Files\Git\bin\bash.exe"
 
 # La suite de integración usa siempre la base de pruebas, nunca la de desarrollo.
 os.environ["DB_NAME"] = TEST_DB
@@ -47,7 +48,17 @@ def base_de_pruebas() -> None:
     """Recrea bodegas_atuel_test desde cero una vez por sesión de pytest."""
     _sql_en_contenedor(f"DROP DATABASE IF EXISTS {TEST_DB} WITH (FORCE);", "postgres")
     _sql_en_contenedor(f"CREATE DATABASE {TEST_DB};", "postgres")
-    subprocess.run(["bash", "scripts/migrate.sh", "--db", TEST_DB], cwd=RAIZ, check=True)
+    resultado = subprocess.run(
+        [GIT_BASH, "scripts/migrate.sh", "--db", TEST_DB],
+        cwd=RAIZ,
+        check=True,
+    )
+    if resultado.returncode != 0:
+        pytest.exit(
+            "migrate.sh falló al preparar la base de pruebas:\n"
+            f"{resultado.stdout[-2000:]}\n{resultado.stderr[-2000:]}",
+            returncode=1,
+        )
 
 def _owner_conninfo() -> str:
     """Cadena de conexión para el rol propietario (owner_bodegas).
@@ -59,28 +70,19 @@ def _owner_conninfo() -> str:
     """
     from psycopg.conninfo import make_conninfo
 
+    password = os.environ.get("POSTGRES_PASSWORD")
+    if not password:
+        pytest.skip("Defina POSTGRES_PASSWORD para ejecutar la suite de integración")
+
     return make_conninfo(
         host=os.environ.get("DB_HOST", "localhost"),
         port=int(os.environ.get("DB_PORT", "5432")),
         dbname=os.environ.get("POSTGRES_DB", "bodegas_atuel"),
         user=os.environ.get("POSTGRES_USER", "owner_bodegas"),
-        password=os.environ.get("POSTGRES_PASSWORD", "pgadmin"),
+        password=password,
         sslmode="prefer",
     )
 
-
-def _app_rw_conninfo() -> str:
-    """Cadena de conexión para el rol de aplicación (app_rw).
-
-    Lee credenciales de variables de entorno (definidas en .env).
-    """
-    settings = get_settings()
-    return settings.conninfo
-
-
-# ---------------------------------------------------------------------------
-# Fixtures de conexión
-# ---------------------------------------------------------------------------
 
 @pytest.fixture()
 def db_owner(base_de_pruebas) -> Generator[psycopg.Connection, None, None]:
@@ -122,8 +124,6 @@ def db_conn(base_de_pruebas) -> Generator[psycopg.Connection, None, None]:
 # ---------------------------------------------------------------------------
 # Resto de fixtures (sin cambios)
 # ---------------------------------------------------------------------------
-
-from collections.abc import Generator as _Generator  # noqa: E402  (re-export for type hints)
 
 
 @pytest.fixture(scope="session")
