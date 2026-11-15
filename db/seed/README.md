@@ -84,3 +84,6 @@ docker exec bodegas-db psql -U owner_bodegas -d postgres -c "DROP DATABASE bodeg
 ## Aclaración sobre dump_completo.sql.gz
 
 El archivo dump_completo.sql.gz no se sube al repositorio. Si supera los 20 MB, se ignora en .gitignore y se regenera con los comandos anteriores cada vez que sea necesario.
+
+## Limitacion conocida
+- En `db/seed/catalogos/localidad.csv`, General Alvear figura con codigo postal `5505` (su codigo postal real es `5620`). Toda la carga (`cliente` y `transportista_localidad`) es internamente consistente con `5505` y las consultas que filtran por nombre de localidad funcionan sin inconvenientes.
