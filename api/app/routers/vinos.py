@@ -13,6 +13,14 @@ import psycopg
 from app.db.pool import get_conn
 from app.db.queries.vinos import crear_vino, eliminar_vino, listar_vinos
 from app.schemas.modelos import VinoCreate
+from app.db.queries.vinos import (
+    crear_vino,
+    eliminar_vino,
+    listar_vinos,
+    obtener_composicion_vino,
+    obtener_maridajes_vino,
+    obtener_vino,
+)
 
 router = APIRouter(prefix="/vinos", tags=["Vinos"])
 
@@ -58,6 +66,26 @@ def listar_vinos_endpoint(
         nombre=nombre,
     )
     return {"items": items, "page": page, "page_size": page_size, "total": total}
+
+
+@router.get("/{cod_vino}")
+def obtener_vino_endpoint(
+    cod_vino: int = Path(..., gt=0),
+    conn: psycopg.Connection = Depends(get_conn),
+) -> dict:
+    """Ficha completa de un vino: bodega, stock, composición y maridajes.
+
+    Son tres consultas de lectura. No hay transacción porque no escriben.
+    """
+    vino = obtener_vino(conn, cod_vino)
+    if vino is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Vino {cod_vino} no encontrado",
+        )
+    vino["composicion"] = obtener_composicion_vino(conn, cod_vino)
+    vino["maridajes"] = obtener_maridajes_vino(conn, cod_vino)
+    return vino
 
 
 @router.delete("/{cod_vino}", status_code=status.HTTP_204_NO_CONTENT)

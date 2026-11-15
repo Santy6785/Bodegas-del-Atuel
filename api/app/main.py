@@ -17,6 +17,7 @@ from app.routers.clientes import router as clientes_router
 from app.routers.comprobantes import router as comprobantes_router
 from app.routers.transferencias import router as transferencias_router
 from app.routers.vinos import router as vinos_router
+from app.routers.catalogos import router as catalogos_router
 
 
 @asynccontextmanager
@@ -41,6 +42,7 @@ app.include_router(comprobantes_router)
 app.include_router(reportes_router)
 app.include_router(transferencias_router)
 app.include_router(clientes_router)
+app.include_router(catalogos_router)
 
 # CORS: permitir conexiones desde el Frontend (puerto 5173 o 3000)
 cors_origins_raw = os.environ.get(

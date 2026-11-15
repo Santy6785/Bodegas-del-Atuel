@@ -18,6 +18,8 @@ import psycopg
 import psycopg.errors as pge
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 logger = logging.getLogger("bodegas.errors")
 
@@ -174,12 +176,67 @@ async def _handler_psycopg_error(request: Request, exc: psycopg.Error) -> JSONRe
     return JSONResponse(status_code=status_code, content=cuerpo, headers=headers)
 
 
-def register_exception_handlers(app: FastAPI) -> None:
-    """Registra el handler genérico de ``psycopg.Error`` en la app.
+def _cuerpo_error(
+    mensaje: str,
+    sqlstate: str | None = None,
+    restriccion: str | None = None,
+) -> dict[str, Any]:
+    """Arma el cuerpo del contrato §1.1 con sus tres campos siempre presentes."""
+    return {
+        "error": {
+            "sqlstate": sqlstate,
+            "mensaje": mensaje,
+            "restriccion": restriccion,
+        }
+    }
 
-    Se registra para la clase base ``psycopg.Error``. Los handlers más
-    específicos (``psycopg.OperationalError`` y ``psycopg_pool.PoolTimeout``)
-    ya registrados en ``main.py`` tienen prioridad por jerarquía de clases,
-    por lo que ``/salud`` sigue devolviendo su cuerpo distinto.
+
+def _describir_validacion(exc: RequestValidationError) -> str:
+    """Convierte los errores de Pydantic en un único texto legible.
+
+    Ejemplo: "cod_vino: Input should be greater than 0; page: ...".
+    El prefijo 'body' se omite para que el nombre del campo quede limpio.
+    """
+    partes: list[str] = []
+    for err in exc.errors():
+        loc = [str(p) for p in err.get("loc", ()) if p != "body"]
+        campo = ".".join(loc) if loc else "solicitud"
+        partes.append(f"{campo}: {err.get('msg', 'valor inválido')}")
+    return "; ".join(partes) or "Solicitud inválida."
+
+
+async def _handler_http(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    """404 de rutas inexistentes, 405 y HTTPException de los routers.
+
+    Son errores que no vienen de la base: sqlstate va en null.
+    Se conservan los headers del error original (por ejemplo, Allow en 405).
+    """
+    mensaje = exc.detail if isinstance(exc.detail, str) else str(exc.detail or "Error")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=_cuerpo_error(mensaje),
+        headers=exc.headers,
+    )
+
+
+async def _handler_validacion(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """Request mal formado (tipos, rangos, campos faltantes): 422 del contrato §1.2."""
+    return JSONResponse(
+        status_code=422,
+        content=_cuerpo_error(_describir_validacion(exc)),
+    )
+
+
+def register_exception_handlers(app: FastAPI) -> None:
+    """Registra todos los handlers de error con el formato del contrato §1.1.
+
+    - psycopg.Error: traducción SQLSTATE -> HTTP (handler existente).
+    - StarletteHTTPException: 404, 405 y HTTPException de los routers.
+    - RequestValidationError: 422 de validación de FastAPI/Pydantic.
+
+    El handler específico de psycopg.OperationalError de main.py (y el de
+    /salud) tiene prioridad por jerarquía de clases, así que no cambia.
     """
     app.add_exception_handler(psycopg.Error, _handler_psycopg_error)
+    app.add_exception_handler(StarletteHTTPException, _handler_http)
+    app.add_exception_handler(RequestValidationError, _handler_validacion)
