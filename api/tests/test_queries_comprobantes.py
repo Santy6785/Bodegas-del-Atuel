@@ -3,6 +3,7 @@
 from decimal import Decimal
 import psycopg
 import pytest
+import uuid
 
 from app.db.queries.comprobantes import crear_comprobante, obtener_comprobante
 
@@ -29,15 +30,11 @@ def test_obtener_comprobante_inexistente_retorna_none(db_conn: psycopg.Connectio
 def _preparar_datos_comprobante(
     conn: psycopg.Connection, db_owner_conn: psycopg.Connection
 ) -> tuple[int, int, int]:
-    """Crea localidad, bodega, sala, cepa, vino con stock y cliente; devuelve (id_cliente, id_sala, cod_vino).
+    """Crea datos únicos por llamada y devuelve (id_cliente, id_sala, cod_vino)."""
+    sufijo = uuid.uuid4().hex[:8]
+    documento = f"99{int(sufijo, 16) % 10**9:09d}"  # 11 caracteres, único por llamada
+    nombre_vino = f"TEST Vino CC2 {sufijo}"
 
-    Las tablas de catálogo se escriben con la conexión de la aplicación
-    (app_rw, en autocommit vía db_conn_commit) y el stock de sala, que
-    app_rw no puede escribir directamente, se inserta con el propietario.
-
-    Vino y su composición se insertan en una misma transacción: el trigger
-    diferido RN-05 valida que los porcentajes sumen 100 al COMMIT.
-    """
     cur = conn.cursor()
     with conn.transaction():
         cur.execute(
@@ -52,8 +49,8 @@ def _preparar_datos_comprobante(
         )
         cur.execute(
             "INSERT INTO sala_venta (calle, numero, dia_cierre, codigo_postal) "
-            "VALUES ('Calle Test CC2', '1', 'lunes', 'TESTCC02') "
-            "ON CONFLICT DO NOTHING RETURNING id_sala",
+            "VALUES (%s, '1', 'lunes', 'TESTCC02') RETURNING id_sala",
+            (f"Calle Test CC2 {sufijo}",),
         )
         id_sala = cur.fetchone()["id_sala"]
         cur.execute(
@@ -61,11 +58,10 @@ def _preparar_datos_comprobante(
             "ON CONFLICT DO NOTHING"
         )
         cur.execute(
-            """
-            INSERT INTO vino (nombre, tipo, anada, volumen_ml, graduacion, precio, cuit_bodega)
-            VALUES ('TEST Vino CC2', 'tinto', 2021, 750, 14.0, 10000.00, '99999999992')
-            RETURNING cod_vino;
-            """
+            "INSERT INTO vino (nombre, tipo, anada, volumen_ml, graduacion, precio, cuit_bodega) "
+            "VALUES (%s, 'tinto', 2021, 750, 14.0, 10000.00, '99999999992') "
+            "RETURNING cod_vino",
+            (nombre_vino,),
         )
         cod_vino = cur.fetchone()["cod_vino"]
         cur.execute("SELECT id_cepa FROM cepa WHERE nombre = 'Cepa Test CC2'")
@@ -77,19 +73,18 @@ def _preparar_datos_comprobante(
         cur.execute(
             "INSERT INTO cliente (apellido_razon_social, nombre, tipo_documento, "
             "nro_documento, direccion, codigo_postal, fecha_alta, tipo_cliente) "
-            "VALUES ('TEST Cliente CC2', 'Cliente', 'CUIT', '99999999992', 'Dir Test', "
-            "'TESTCC02', CURRENT_DATE, 'socio') RETURNING id_cliente;",
+            "VALUES ('TEST Cliente CC2', 'Cliente', 'CUIT', %s, 'Dir Test', "
+            "'TESTCC02', CURRENT_DATE, 'socio') RETURNING id_cliente",
+            (documento,),
         )
         id_cliente = cur.fetchone()["id_cliente"]
-    # Stock de sala: 100 botellas (suficiente para ventas de prueba).
-    # stock_sala es de solo lectura para app_rw: se inserta con el propietario
-    # una vez que sala y vino ya están confirmados.
+
+    # stock_sala no lo puede escribir app_rw: se inserta con el propietario.
     db_owner_conn.execute(
         "INSERT INTO stock_sala (id_sala, cod_vino, cantidad) VALUES (%s, %s, 100)",
         (id_sala, cod_vino),
     )
     return id_cliente, id_sala, cod_vino
-
 
 @pytest.mark.integration
 def test_crear_comprobante_sin_stock_lanza_p0001(

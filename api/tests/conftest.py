@@ -5,6 +5,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import os
+import pathlib
+import subprocess
 import psycopg
 from psycopg.rows import dict_row
 import pytest
@@ -14,6 +16,13 @@ from app.config import get_settings
 from app.db.pool import get_conn
 from app.main import app
 
+TEST_DB = "bodegas_atuel_test"
+RAIZ = pathlib.Path(__file__).resolve().parents[2]
+
+# La suite de integración usa siempre la base de pruebas, nunca la de desarrollo.
+os.environ["DB_NAME"] = TEST_DB
+os.environ["POSTGRES_DB"] = TEST_DB
+get_settings.cache_clear()
 
 def pytest_configure(config):
     """Registra el marcador ``integration`` para pruebas con base de datos real."""
@@ -21,6 +30,24 @@ def pytest_configure(config):
         "markers", "integration: pruebas de integración con base de datos real"
     )
 
+def _sql_en_contenedor(sql: str, base: str) -> None:
+    subprocess.run(
+        [
+            "docker", "compose", "exec", "-T", "db",
+            "psql", "-U", "owner_bodegas", "-d", base,
+            "-v", "ON_ERROR_STOP=1", "-c", sql,
+        ],
+        cwd=RAIZ,
+        check=True,
+    )
+
+
+@pytest.fixture(scope="session")
+def base_de_pruebas() -> None:
+    """Recrea bodegas_atuel_test desde cero una vez por sesión de pytest."""
+    _sql_en_contenedor(f"DROP DATABASE IF EXISTS {TEST_DB} WITH (FORCE);", "postgres")
+    _sql_en_contenedor(f"CREATE DATABASE {TEST_DB};", "postgres")
+    subprocess.run(["bash", "scripts/migrate.sh", "--db", TEST_DB], cwd=RAIZ, check=True)
 
 def _owner_conninfo() -> str:
     """Cadena de conexión para el rol propietario (owner_bodegas).
@@ -51,129 +78,12 @@ def _app_rw_conninfo() -> str:
     return settings.conninfo
 
 
-def _limpiar_datos_test(conn: psycopg.Connection) -> None:
-    """Elimina datos de prueba identificados por prefijo 'TEST' o CUITs '999999999__'.
-
-    Debe ejecutarse con un rol que tenga privilegios de escritura en todas
-    las tablas de prueba (por ejemplo, el rol propietario), ya que app_rw
-    no puede escribir directamente en comprobante, renglon_comprobante,
-    stock_sala, stock_deposito ni auditoria_precio.
-
-    Estrategia de borrado:
-      - Los vinos de prueba se identifican por ``cuit_bodega LIKE '999999999__'``
-        o ``nombre LIKE 'TEST%'`` (un vino de prueba puede no empezar por
-        ``TEST`` si su bodega sí es de prueba). Se borran en una sola
-        transacción: el disparador diferido RN-05 se evalúa al COMMIT, cuando
-        las filas de ``vino`` ya fueron eliminadas, por lo que se salta la
-        validación (RN-05 solo aplica mientras el vino exista).
-      - El resto se borra una sentencia por transacción (autocommit), de modo
-        que un fallo en una tabla (p. ej. RN-12 que impide borrar renglones de
-        transferencia ya procesada, o FK pendiente) no impida limpiar el resto.
-        En particular, ``bodega`` y ``transportista`` con CUIT de prueba
-        siempre se intentan borrar, que es lo que verifica la entrega.
-    """
-    # Predicado que identifica los vinos de prueba (se reusa en todas las
-    # sentencias que los tocan para que el borrado sea consistente).
-    vino_test = "cuit_bodega LIKE '999999999__' OR nombre LIKE 'TEST%'"
-    # Familia vino: borrado agrupado para respetar el disparador diferido RN-05.
-    # Los renglones que referencian al vino se borran en la misma transacción
-    # para que ``DELETE FROM vino`` no infrinja FK RESTRICT.
-    try:
-        with conn.transaction():
-            conn.execute(
-                "DELETE FROM renglon_comprobante WHERE cod_vino IN ("
-                f" SELECT cod_vino FROM vino WHERE {vino_test})"
-            )
-            conn.execute(
-                "DELETE FROM renglon_ingreso WHERE cod_vino IN ("
-                f" SELECT cod_vino FROM vino WHERE {vino_test})"
-            )
-            for tabla in (
-                "auditoria_precio",
-                "stock_sala",
-                "stock_deposito",
-                "vino_maridaje",
-                "vino_lote",
-            ):
-                conn.execute(
-                    f"DELETE FROM {tabla} WHERE cod_vino IN ("
-                    f" SELECT cod_vino FROM vino WHERE {vino_test})"
-                )
-            conn.execute(
-                "DELETE FROM vino_cepa WHERE cod_vino IN ("
-                f" SELECT cod_vino FROM vino WHERE {vino_test})"
-            )
-            conn.execute(f"DELETE FROM vino WHERE {vino_test}")
-    except Exception:
-        pass
-
-    # Resto de tablas: una sentencia por transacción (autocommit). Un fallo en
-    # una tabla no detiene las siguientes, para que la limpieza siempre llegue
-    # al final y borre bodega/transportista (verificadas en la entrega).
-    sentencias = [
-        # Renglones de comprobante y de ingreso que hagan referencia a vinos de prueba.
-        f"DELETE FROM renglon_comprobante WHERE cod_vino IN ("
-        f" SELECT cod_vino FROM vino WHERE {vino_test})",
-        f"DELETE FROM renglon_ingreso WHERE cod_vino IN ("
-        f" SELECT cod_vino FROM vino WHERE {vino_test})",
-        # Movimientos y sus renglones (orden respetando FK RESTRICT).
-        "DELETE FROM renglon_comprobante WHERE nro_comprobante IN ("
-        " SELECT c.nro_comprobante FROM comprobante c "
-        " JOIN cliente cl ON c.id_cliente = cl.id_cliente "
-        " WHERE cl.apellido_razon_social LIKE 'TEST%' OR cl.nro_documento LIKE '99%')",
-        "DELETE FROM comprobante WHERE id_cliente IN ("
-        " SELECT id_cliente FROM cliente WHERE apellido_razon_social LIKE 'TEST%' OR nro_documento LIKE '99%')",
-        # RN-12 impide borrar renglones de transferencia que no estén en
-        # 'en_confeccion': solo se borran los de transferencias en confección.
-        "DELETE FROM renglon_transferencia WHERE nro_transferencia IN ("
-        " SELECT nro_transferencia FROM transferencia "
-        " WHERE estado = 'en_confeccion' AND id_sala IN ("
-        "   SELECT id_sala FROM sala_venta WHERE calle LIKE 'TEST%'))",
-        "DELETE FROM transferencia WHERE estado = 'en_confeccion' AND id_sala IN ("
-        " SELECT id_sala FROM sala_venta WHERE calle LIKE 'TEST%')",
-        "DELETE FROM renglon_ingreso WHERE cod_ingreso IN ("
-        " SELECT i.cod_ingreso FROM ingreso i "
-        " JOIN transportista tr ON i.cod_transportista = tr.cod_transportista "
-        " WHERE tr.razon_social LIKE 'TEST%' OR tr.cuit LIKE '999999999__')",
-        "DELETE FROM ingreso WHERE cod_transportista IN ("
-        " SELECT cod_transportista FROM transportista WHERE razon_social LIKE 'TEST%' OR cuit LIKE '999999999__')"
-        " OR cuit_bodega LIKE '999999999__'",
-        # Hijos de cliente (subtipos) y luego el cliente.
-        "DELETE FROM permiso_exportacion WHERE id_cliente IN ("
-        " SELECT id_cliente FROM cliente WHERE apellido_razon_social LIKE 'TEST%' OR nro_documento LIKE '99%')",
-        "DELETE FROM cliente_distribuidor WHERE id_cliente IN ("
-        " SELECT id_cliente FROM cliente WHERE apellido_razon_social LIKE 'TEST%' OR nro_documento LIKE '99%')",
-        "DELETE FROM cliente_exportador WHERE id_cliente IN ("
-        " SELECT id_cliente FROM cliente WHERE apellido_razon_social LIKE 'TEST%' OR nro_documento LIKE '99%')",
-        "DELETE FROM cliente WHERE apellido_razon_social LIKE 'TEST%' OR nro_documento LIKE '99%'",
-        # Catálogos auxiliares.
-        "DELETE FROM bodega WHERE cuit LIKE '999999999__'",
-        "DELETE FROM cepa WHERE nombre LIKE 'TEST%'",
-        "DELETE FROM maridaje WHERE nombre LIKE 'TEST%'",
-        "DELETE FROM transportista WHERE cuit LIKE '999999999__'",
-        "DELETE FROM sala_venta WHERE calle LIKE 'TEST%'",
-        "DELETE FROM localidad WHERE codigo_postal LIKE 'TEST%'",
-    ]
-    for sql in sentencias:
-        try:
-            conn.execute(sql)
-        except Exception:
-            pass
-
-
 # ---------------------------------------------------------------------------
 # Fixtures de conexión
 # ---------------------------------------------------------------------------
 
 @pytest.fixture()
-def db_owner() -> Generator[psycopg.Connection, None, None]:
-    """Conexión como rol propietario (owner_bodegas).
-
-    Se usa SOLO para preparar y limpiar datos de prueba en tablas a las que
-    app_rw no tiene escritura directa (comprobante, renglon_comprobante,
-    stock_sala, stock_deposito, auditoria_precio). Nunca se usa para
-    validar el comportamiento de la API.
-    """
+def db_owner(base_de_pruebas) -> Generator[psycopg.Connection, None, None]:
     if not is_database_reachable():
         pytest.skip("Base de datos PostgreSQL no disponible para pruebas de integración")
     conn = psycopg.connect(_owner_conninfo(), autocommit=True, row_factory=dict_row)
@@ -184,39 +94,21 @@ def db_owner() -> Generator[psycopg.Connection, None, None]:
 
 
 @pytest.fixture()
-def db_conn_commit() -> Generator[psycopg.Connection, None, None]:
-    """Conexión real con app_rw para tests que necesitan evaluar COMMIT (triggers diferidos).
-
-    La conexión entregada al test es de app_rw. La limpieza de datos de prueba
-    (antes y después) se ejecuta con db_owner, ya que app_rw no puede escribir
-    directamente en tablas de venta y stock.
-    """
+def db_conn_commit(base_de_pruebas) -> Generator[psycopg.Connection, None, None]:
     if not is_database_reachable():
         pytest.skip("Base de datos PostgreSQL no disponible para pruebas de integración")
-
-    settings = get_settings()
-    conn = psycopg.connect(settings.conninfo, autocommit=True, row_factory=dict_row)
-    owner_conn = psycopg.connect(_owner_conninfo(), autocommit=True, row_factory=dict_row)
+    conn = psycopg.connect(get_settings().conninfo, autocommit=True, row_factory=dict_row)
     try:
-        _limpiar_datos_test(owner_conn)
         yield conn
     finally:
-        _limpiar_datos_test(owner_conn)
-        owner_conn.close()
         conn.close()
 
 
 @pytest.fixture()
-def db_conn() -> Generator[psycopg.Connection, None, None]:
-    """Conexión real con app_rw dentro de una transacción que finaliza en ROLLBACK.
-
-    Garantiza aislamiento total para tests que no requieran COMMIT de triggers diferidos.
-    """
+def db_conn(base_de_pruebas) -> Generator[psycopg.Connection, None, None]:
     if not is_database_reachable():
         pytest.skip("Base de datos PostgreSQL no disponible para pruebas de integración")
-
-    settings = get_settings()
-    conn = psycopg.connect(settings.conninfo, row_factory=dict_row)
+    conn = psycopg.connect(get_settings().conninfo, row_factory=dict_row)
     try:
         with conn.transaction():
             yield conn

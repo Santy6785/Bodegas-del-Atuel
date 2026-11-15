@@ -368,8 +368,8 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
 BEGIN
-    INSERT INTO auditoria_precio (cod_vino, precio_anterior, precio_nuevo)
-    VALUES (NEW.cod_vino, OLD.precio, NEW.precio);
+    INSERT INTO auditoria_precio (cod_vino, precio_anterior, precio_nuevo, usuario)
+    VALUES (NEW.cod_vino, OLD.precio, NEW.precio, session_user); --session user devuelve el rol que abrió la conexión
     RETURN NULL;
 END;
 $$;

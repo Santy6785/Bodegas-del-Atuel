@@ -98,6 +98,14 @@ while [[ $# -gt 0 ]]; do
       show_help
       exit 0
       ;;
+    --db)
+      if [[ -z "${2:-}" ]]; then
+        echo "ERROR: La opción --db requiere un argumento." >&2
+        exit 1
+      fi
+      DB_OVERRIDE="$2"
+      shift 2
+      ;;
     *)
       echo "ERROR: Opción no reconocida: $1" >&2
       show_help >&2
@@ -105,6 +113,11 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+# Si se pasó --db, tiene prioridad sobre POSTGRES_DB de .env
+if [[ -n "${DB_OVERRIDE:-}" ]]; then
+  DB_NAME="$DB_OVERRIDE"
+fi
 
 # Determinar el modo de conexión activo
 if [[ -n "$DATABASE_URL" ]]; then
@@ -116,7 +129,7 @@ fi
 # Argumentos extra para 'docker compose exec ... psql'.
 # -e APP_DB_PASSWORD y -e APP_RO_PASSWORD inyectan las contraseñas por entorno
 # (Docker toma el valor del entorno del script; no aparecen en la línea de comandos).
-DOCKER_PSQL_ARGS=(-T db -e APP_DB_PASSWORD -e APP_RO_PASSWORD)
+DOCKER_PSQL_ARGS=(-T -e APP_DB_PASSWORD -e APP_RO_PASSWORD db)
 
 # Validación previa: existencia del directorio de migraciones
 if [[ ! -d "$MIGRATIONS_DIR" ]]; then

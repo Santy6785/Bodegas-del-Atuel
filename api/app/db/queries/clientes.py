@@ -22,6 +22,10 @@ from ._reglas import (
 # o "12.345" como si fueran "301234" o "12345".
 _PATRON_DOCUMENTO = re.compile(r"[0-9][0-9.\- ]*")
 
+def _escapar_like(texto: str) -> str:
+    """Escapa los metacaracteres de LIKE para tratarlos como texto literal."""
+    return texto.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
 
 def listar_clientes(
     conn: psycopg.Connection,
@@ -82,7 +86,7 @@ def listar_clientes(
          ORDER BY c.apellido_razon_social ASC, c.id_cliente ASC
          LIMIT %s OFFSET %s
     """
-    # ... resto igual (rows, total, count de página vacía)
+
 
     with conn.cursor() as cur:
         cur.execute(query, params + [page_size, offset])
@@ -99,9 +103,6 @@ def listar_clientes(
         total_real = int(count_row["total"]) if count_row else 0
         return [], total_real
 
-def _escapar_like(texto: str) -> str:
-    """Escapa los metacaracteres de LIKE para tratarlos como texto literal."""
-    return texto.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 def obtener_cliente(conn: psycopg.Connection, id_cliente: int) -> dict | None:
     """Obtiene el detalle completo de un cliente incluyendo datos de su subtipo y permisos.

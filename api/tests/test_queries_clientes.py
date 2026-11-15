@@ -64,7 +64,7 @@ def test_listar_clientes_paginado_y_filtro_tipo(db_conn: psycopg.Connection):
     cur.execute(
         """
         INSERT INTO cliente (apellido_razon_social, nombre, tipo_documento, nro_documento, direccion, codigo_postal, tipo_cliente)
-        VALUES ('TEST Socio 1', 'Ana', 'DNI', '99333444', 'Calle 1', 'TEST5601', 'socio')
+        VALUES ('TESTSOCIOUNICO', 'Ana', 'DNI', '99333444', 'Calle 1', 'TEST5601', 'socio')
         RETURNING id_cliente;
         """
     )
@@ -80,18 +80,24 @@ def test_listar_clientes_paginado_y_filtro_tipo(db_conn: psycopg.Connection):
         "INSERT INTO cliente_distribuidor (id_cliente, zona_cobertura, nro_habilitacion) VALUES (%s, 'Cuyo', 'HAB-9901')",
         (id_dist,),
     )
+    cur.execute(
+        "SELECT id_cliente FROM cliente WHERE apellido_razon_social = 'TESTSOCIOUNICO'"
+    )
+    id_socio = cur.fetchone()["id_cliente"]
 
-    # Filtrar por socio
-    items_socios, total_socios = listar_clientes(db_conn, tipo_cliente="socio")
-    assert total_socios >= 1
-    assert all(c["tipo_cliente"] == "socio" for c in items_socios)
-    assert all(c["descuento_pct"] == Decimal("10.00") for c in items_socios)
+    # Filtrar por socio: verificar que el socio creado esté con descuento 10.00.
+    items_socios, total_socios = listar_clientes(db_conn, q="TESTSOCIOUNICO", tipo_cliente="socio")
+    assert total_socios == 1
+    socio_item = items_socios[0]
+    assert socio_item["id_cliente"] == id_socio
+    assert socio_item["descuento_pct"] == Decimal("10.00")
 
-    # Filtrar por distribuidor
+    # Filtrar por distribuidor: verificar que el distribuidor creado esté con descuento 20.00.
     items_dist, total_dist = listar_clientes(db_conn, tipo_cliente="distribuidor")
     assert total_dist >= 1
     assert any(c["id_cliente"] == id_dist for c in items_dist)
     dist_item = next(c for c in items_dist if c["id_cliente"] == id_dist)
+    assert dist_item["tipo_cliente"] == "distribuidor"
     assert dist_item["descuento_pct"] == Decimal("20.00")
 
 
@@ -213,9 +219,12 @@ def test_crear_cliente_exportador_con_permisos(db_conn_commit: psycopg.Connectio
 def test_listar_clientes_filtro_q(db_conn_commit: psycopg.Connection):
     """Caso: q de GET /clientes filtra por apellido, por prefijo de documento y trata % como literal.
 
-    Crea dos clientes con apellidos distintos y comprueba:
-      - q="Per" devuelve solo el cliente cuyo apellido contiene "Per".
-      - q="30123" devuelve solo el cliente cuyo documento empieza con ese prefijo.
+    Usa tokens únicos para que total == 1 se sostenga aunque la base de
+    integración ya contenga clientes (seed con Faker u otros datos previos).
+
+    Crea dos clientes y comprueba:
+      - q="ZQPERALTA" devuelve solo el cliente cuyo apellido contiene ese token.
+      - q="9988776" devuelve solo el cliente cuyo documento empieza con ese prefijo de 7 dígitos.
       - q="%" devuelve cero resultados (el % se trata como texto literal, no como comodín).
     """
     db_conn_commit.execute(
@@ -226,48 +235,43 @@ def test_listar_clientes_filtro_q(db_conn_commit: psycopg.Connection):
         """
     )
     cur = db_conn_commit.cursor()
-    # Cliente 1: apellido Peralta (contiene "Per"), documento 30123456 (prefijo 30123)
+    # Cliente 1: apellido con token único TESTZQPERALTA, documento con prefijo 9988776
     cur.execute(
         """
         INSERT INTO cliente (apellido_razon_social, nombre, tipo_documento, nro_documento, direccion, codigo_postal, tipo_cliente)
-        VALUES ('TEST Peralta', 'Juan', 'DNI', '30123456', 'Calle Falsa 123', 'TEST5610', 'socio')
+        VALUES ('TESTZQPERALTA', 'Juan', 'DNI', '998877601', 'Calle Falsa 123', 'TEST5610', 'socio')
         RETURNING id_cliente;
         """
     )
-    id_peralta = cur.fetchone()["id_cliente"]
-    # Cliente 2: apellido García (no contiene "Per"), documento 40987654 (no empieza con 30123)
+    id_zqperalta = cur.fetchone()["id_cliente"]
+    # Cliente 2: apellido sin el token, documento sin ese prefijo
     cur.execute(
         """
         INSERT INTO cliente (apellido_razon_social, nombre, tipo_documento, nro_documento, direccion, codigo_postal, tipo_cliente)
-        VALUES ('TEST García', 'María', 'DNI', '40987654', 'Avenida Siempre Viva 742', 'TEST5610', 'socio')
+        VALUES ('TESTZQGARCIA', 'María', 'DNI', '40987654', 'Avenida Siempre Viva 742', 'TEST5610', 'socio')
         RETURNING id_cliente;
         """
     )
-    id_garcia = cur.fetchone()["id_cliente"]
+    id_zqgarcia = cur.fetchone()["id_cliente"]
 
-    try:
-        # q="Per" filtra por apellido que contiene "Per" (case-insensitive)
-        items, total = listar_clientes(db_conn_commit, q="Per")
-        assert total == 1
-        assert items[0]["id_cliente"] == id_peralta
-        assert items[0]["apellido_razon_social"] == "TEST Peralta"
+    # q="ZQPERALTA" filtra por apellido que contiene el token único (case-insensitive)
+    items, total = listar_clientes(db_conn_commit, q="ZQPERALTA")
+    assert total == 1
+    assert items[0]["id_cliente"] == id_zqperalta
+    assert items[0]["apellido_razon_social"] == "TESTZQPERALTA"
 
-        # q="30123" filtra por prefijo de documento
-        items, total = listar_clientes(db_conn_commit, q="30123")
-        assert total == 1
-        assert items[0]["id_cliente"] == id_peralta
-        assert items[0]["nro_documento"] == "30123456"
+    # q="9988776" filtra por prefijo de documento de 7 dígitos
+    items, total = listar_clientes(db_conn_commit, q="9988776")
+    assert total == 1
+    assert items[0]["id_cliente"] == id_zqperalta
+    assert items[0]["nro_documento"] == "998877601"
 
-        # q="%" trata % como literal: no coincide con ningún documento ni apellido
-        items, total = listar_clientes(db_conn_commit, q="%")
-        assert total == 0
-        assert items == []
-    finally:
-        # Limpieza manual de los clientes creados (prefijo TEST no alcanza: el conftest
-        # solo borra apellidos/documentos TEST o 99%, y estos apellidos no empiezan por TEST)
-        db_conn_commit.execute(
-            "DELETE FROM cliente WHERE id_cliente IN (%s, %s)", (id_peralta, id_garcia)
-        )
+    # q="%" trata % como literal: no coincide con ningún documento ni apellido
+    items, total = listar_clientes(db_conn_commit, q="%")
+    assert total == 0
+    assert items == []
+# No hay finally de limpieza: los apellidos empiezan por TEST y los documentos por 99,
+    # así que el conftest (_limpiar_datos_test con db_owner) los borra al finalizar el test.
 
 
 @pytest.mark.integration
@@ -308,7 +312,7 @@ def test_listar_clientes_filtro_q_documento_con_separadores(
     cur.execute(
         """
         INSERT INTO cliente (apellido_razon_social, nombre, tipo_documento, nro_documento, direccion, codigo_postal, tipo_cliente)
-        VALUES ('TEST Otro', 'Luis', 'DNI', '40987654', 'Calle 3', 'TEST5611', 'socio')
+        VALUES ('TEST Otro', 'Luis', 'DNI', '40111222', 'Calle 3', 'TEST5611', 'socio')
         RETURNING id_cliente;
         """
     )
@@ -370,3 +374,15 @@ def test_crear_cliente_incoherencia_subtipo_falla_trigger(db_conn_commit: psycop
             )
     assert exc_info.value.sqlstate == "P0001"
     assert "Incoherencia de tipo de cliente" in str(exc_info.value)
+
+def test_listar_clientes_pasa_q_a_la_dal(client, monkeypatch):
+    capturados = {}
+
+    def falso_listar(conn, **kwargs):
+        capturados.update(kwargs)
+        return [], 0
+
+    monkeypatch.setattr("app.routers.clientes.listar_clientes", falso_listar)
+    resp = client.get("/clientes", params={"q": "30-1234"})
+    assert resp.status_code == 200
+    assert capturados["q"] == "30-1234"
