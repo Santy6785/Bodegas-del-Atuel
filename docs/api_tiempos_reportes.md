@@ -1,14 +1,8 @@
 # Tiempos de respuesta de los reportes (issue #70)
 
-Mediciones de las consultas de reportes S1, S6, S7 y S8 contra una base con volumen real. Las cifras salen de ejecuciones reales con `scripts/perf/medir_consultas_reportes.py`.
+Mediciones de los reportes S1, S6, S7 y S8 contra una base con volumen real, en dos niveles: **consulta directa** (funciones de `queries/reportes.py`) y **endpoint HTTP** (router `/reportes/*`). Las cifras salen de ejecuciones reales.
 
-## 1. Alcance y limitaciones
-
-La issue pide ejecutar los endpoints de reportes y registrar el tiempo de cada uno. **Al momento de la medición, `main` no tiene el router de reportes**: los endpoints publicados son `/vinos`, `/comprobantes`, `/transferencias`, `/clientes` y `/salud`. Por eso se midieron **directamente las funciones de `api/app/db/queries/reportes.py`**, con el mismo pool de conexiones que usa la API.
-
-Consecuencia: los tiempos son **tiempo de consulta**. No incluyen red, enrutamiento ni serialización a JSON. Cuando exista el router, hay que repetir la medición por HTTP (ver sección 5).
-
-## 2. Entorno
+## 1. Entorno
 
 | Dato | Valor |
 |---|---|
@@ -17,11 +11,14 @@ Consecuencia: los tiempos son **tiempo de consulta**. No incluyen red, enrutamie
 | `comprobante` | 170.000 filas |
 | `renglon_comprobante` | 680.060 filas |
 | `sala_venta` / `vino` / `cliente` | 15 / 40 / 200 (según las constantes del seed) |
-| Usuario | `owner_bodegas`. En la base de prueba la migración 007 (roles) falló, así que no se usó `app_rw`. |
+| API | uvicorn local, un solo proceso, mismo equipo que la base |
+| Usuario de la base | `owner_bodegas`. En la base de prueba la migración 007 (roles) falló, así que no se usó `app_rw`. |
 | Índices | `008_indices.sql` está vacío: no hay índice sobre `comprobante.fecha`. |
-| Método | 1 llamada inicial (primera) y 5 repeticiones por consulta, sobre una misma conexión del pool. Se informa la mediana de las 5. Caché caliente. |
+| Método | 1 llamada inicial (primera) y 5 repeticiones por reporte. Se informa la mediana de las 5. Caché caliente. |
 
-## 3. Resultados
+## 2. Tiempo de consulta (sin HTTP)
+
+Medido con `scripts/perf/medir_consultas_reportes.py`, llamando a las funciones de `queries/reportes.py` con el pool de la API. No incluye red ni JSON.
 
 | Código | Reporte | Filas | Primera (ms) | Mediana (ms) | Mín (ms) | Máx (ms) |
 |---|---|---|---|---|---|---|
@@ -29,25 +26,42 @@ Consecuencia: los tiempos son **tiempo de consulta**. No incluyen red, enrutamie
 | S6 | Vinos sin stock en sala 1 | 0 | 15,1 | 2,7 | 2,4 | 4,1 |
 | S7 | Transportista con mayor actividad (último mes) | 0 | 25,8 | 2,2 | 2,0 | 3,8 |
 | S8 | Ventas por sala (último trimestre) | 15 | 469,8 | 50,4 | 41,2 | 57,7 |
-| S8 (variante) | Ventas por sala (sin filtro de fecha) | 15 | 107,2 | 99,6 | 95,2 | 105,3 |
+| S8-total | Ventas por sala (sin filtro de fecha) | 15 | 107,2 | 99,6 | 95,2 | 105,3 |
+
+## 3. Tiempo de respuesta HTTP
+
+Medido con `scripts/perf/medir_reportes.ps1 -Base "http://127.0.0.1:8000"`, contra los endpoints del router de reportes.
+
+| Código | Endpoint | HTTP | Primera (ms) | Mediana (ms) | Mín (ms) | Máx (ms) |
+|---|---|---|---|---|---|---|
+| S1 | `/reportes/top-vinos` | 200 | 1196,9 | 162,7 | 158,7 | 296,6 |
+| S6 | `/reportes/vinos-sin-stock?id_sala=1` | 200 | 24,0 | 8,3 | 7,9 | 10,1 |
+| S7 | `/reportes/transportista-activo` | 200 | 23,1 | 8,2 | 7,6 | 8,9 |
+| S8 | `/reportes/ventas-por-sala?periodo=ultimo_trimestre` | 200 | 497,9 | 44,2 | 41,7 | 52,4 |
+| S8-total | `/reportes/ventas-por-sala` | 200 | 102,4 | 104,9 | 94,9 | 115,5 |
 
 ## 4. Observaciones
 
-**S1, top vinos (200 ms).** Es el reporte más lento. Agrega todos los renglones de `renglon_comprobante` (680.060) para sumar botellas por vino, así que no hay un filtro que un índice pueda aprovechar. En la medición con `EXPLAIN` de la issue #56 el plan fue un Parallel Seq Scan. Si hiciera falta acelerarlo, la opción es una vista materializada con el ranking precalculado.
+**Usar `127.0.0.1` y no `localhost` al medir en Windows.** Una primera corrida con `http://localhost:8000` dio unos 200 ms de más en todos los reportes, incluso en los que devuelven 12 bytes (S6: 215 ms; S7: 218 ms). Al repetir con `http://127.0.0.1:8000` bajaron a 8 ms. Es coherente con la resolución de `localhost` a IPv6 en Windows antes de caer a IPv4, aunque no se verificó con otra herramienta. Las cifras de la sección 3 son las de `127.0.0.1`.
 
-**S8, ventas por sala.** Con el filtro del último trimestre tarda 50 ms, y sin filtro de fecha 100 ms, porque agrupa todos los comprobantes. Todavía no hay índice sobre `comprobante.fecha`. En la issue #56 se probó `CREATE INDEX ... ON comprobante (fecha) INCLUDE (id_sala, total)` y la consulta simplificada bajó de 216 ms a 6 ms; esa propuesta queda pendiente para el rol Datos (`008_indices.sql`).
+**Costo de HTTP.** En las consultas cortas (S6 y S7) el endpoint tarda unos 6 ms más que la consulta directa (8,3 vs 2,7 ms y 8,2 vs 2,2 ms): es el costo de enrutamiento, serialización y red local. En las consultas largas (S1 y S8) las medianas por HTTP y directas son comparables y la diferencia queda dentro de la variación entre corridas, por lo que no se atribuye un costo.
 
-**S6 y S7: resultado vacío.** Ambas devolvieron 0 filas, así que **sus tiempos (2,7 y 2,2 ms) miden consultas casi vacías y no son representativos**.
-- S6 devuelve vinos sin stock en la sala pero con stock en el depósito. En el seed todas las salas tienen stock suficiente, así que no hay filas.
+**S1, top vinos (163 ms).** Es el reporte más lento. Agrega los 680.060 renglones para sumar botellas por vino, así que no hay un filtro que un índice pueda aprovechar. En la medición con `EXPLAIN` de la issue #56 el plan fue un Parallel Seq Scan. Si hubiera que acelerarlo, la opción es una vista materializada con el ranking precalculado.
+
+**S8, ventas por sala.** Con el filtro del último trimestre tarda 44 ms; sin filtro de fecha, 105 ms, porque agrupa todos los comprobantes. No hay índice sobre `comprobante.fecha`. En la #56 se probó `CREATE INDEX ... ON comprobante (fecha) INCLUDE (id_sala, total)` y una consulta simplificada bajó de 216 ms a 6 ms. Esa propuesta sigue pendiente para el rol Datos (`008_indices.sql`).
+
+**S6 y S7: resultado vacío.** Ambos devolvieron `items: []`, así que sus tiempos (8 ms) miden consultas casi vacías y no son representativos del costo con resultados reales.
+- S6 devuelve vinos sin stock en la sala pero con stock en el depósito. En el seed todas las salas tienen stock suficiente.
 - S7 mira los ingresos del último mes. Los ingresos que carga el seed no caen en ese rango.
 
-**Primera llamada.** Es mucho más lenta que la mediana (S1: 1.063 ms; S8: 470 ms) porque incluye el calentamiento de caché y de la conexión. En producción, la primera consulta tras arrancar la API tendrá ese costo.
+**Primera llamada.** Es mucho más lenta que la mediana (S1: 1.197 ms; S8: 498 ms) por el calentamiento de caché y de conexiones. En producción, la primera consulta tras arrancar la API tendrá ese costo.
 
-**Comparación con los `EXPLAIN` de la #56.** Los tiempos no coinciden con los de aquella medición (S1: 322 ms; S8: 216 ms). `EXPLAIN ANALYZE` agrega sobrecarga de instrumentación, y además aquellas consultas eran versiones simplificadas de las de `main`. No se investigó la diferencia a fondo, por lo que no se atribuye a una causa concreta.
+**Formato de la respuesta.** Los importes (`monto_total`) viajan como texto (por ejemplo `"1195273180.55"`), porque FastAPI serializa los `Decimal` como string para no perder precisión. El front debe mostrarlos, no calcular con ellos.
 
 ## 5. Pendientes
 
-1. **Medir por HTTP** cuando exista el router de reportes (top-vinos, vinos-sin-stock, transportista-activo, ventas-por-sala). Se puede usar `scripts/perf/medir_reportes.ps1`.
-2. **Datos para S6 y S7.** Preparar una sala con vinos sin stock y ingresos recientes para medir con resultados no vacíos.
-3. **Repetir con caché fría** y con el índice sobre `comprobante.fecha` aplicado.
-4. **Repetir con el rol `app_rw`**, una vez que la migración 007 se aplique en la base de prueba.
+1. **Datos para S6 y S7.** Preparar una sala con vinos sin stock e ingresos recientes para medir con resultados no vacíos.
+2. **Repetir con el rol `app_rw`**, una vez que la migración 007 se aplique en la base de prueba (issue #72).
+3. **Repetir con el índice sobre `comprobante.fecha`** cuando el rol Datos lo incorpore a `008_indices.sql`.
+4. **Repetir con caché fría.**
+5. **Trazabilidad** (`/reportes/trazabilidad/{cod_vino}`): no está en el router y no se midió.
