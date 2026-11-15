@@ -66,24 +66,28 @@ Respetar esta jerarquía permite insertar registros en orden de dependencia for�
 El orden real de inserción dentro de la transacción es:
 
 1. **`01_pre_carga.sql`**: deshabilita los triggers críticos de stock/estado/fecha (7 triggers de usuario).
-2. **Catálogos desde CSV** (`insertar_catalogos`): `departamento`, `localidad`, `bodega`, `cepa`, `maridaje` (IDs reales de los archivos CSV).
+2. **Catálogos desde CSV** (`insertar_catalogos`): `departamento`, `localidad`, `bodega`, `cepa` (12 filas; 4 sin uso para D2), `maridaje` (IDs reales de los archivos CSV).
 3. **Datos maestros** (`insertar_maestros`): `finca`, `parcela`, `lote_uva`, `vino`, `vino_cepa`, `vino_maridaje`, `vino_lote` (trazabilidad).
-4. **Clientes** (`insertar_clientes`): `cliente` (200 filas) + subtipos `cliente_distribuidor` / `cliente_exportador` + `permiso_exportacion`.
-5. **Salas y transportistas** (`insertar_salas_y_transportistas`): `sala_venta` (15), `transportista` (6), `transportista_localidad`.
-6. **Stock inicial** (`poblar_stock`): `stock_deposito` (una fila por vino) y `stock_sala` (una fila por par sala-vino).
-7. **Movimientos de stock** (`poblar_movimientos_stock`): `ingreso` + `renglon_ingreso` (40 ingresos) y `transferencia` + `renglon_transferencia` (600 transferencias) que justifican el stock inicial.
-8. **Ventas masivas** (`generar_ventas`): `comprobante` (170000, INSERT por lotes) y `renglon_comprobante` (680046, vía `COPY`).
-9. **Recálculo de totales** (`recalcular_totales_comprobante`): actualiza `subtotal`/`descuento`/`total` de `comprobante` mientras los triggers siguen deshabilitados.
-10. **`03_post_carga.sql`**: habilita triggers, valida `tgenabled='O'`, ajusta secuencias con `setval`, `REFRESH MATERIALIZED VIEW`, `ANALYZE`.
-11. `SET CONSTRAINTS ALL IMMEDIATE` (forza los constraint triggers diferidos `ctg_*`).
-12. **`02b_gate.sql`**: gate de integridad; aborta si algún control devuelve filas.
-13. **`COMMIT`** único al final.
-
-**Tablas del esquema no cargadas por `seed.py` (pendientes para la demo):** `empleado`, `analisis_calidad` y `auditoria_precio`. Están definidas en `001_esquema.sql` con sus FKs, pero `seed.py` no las pobla; se dejan para una fase posterior de demostración.
+4. **Clientes** (`insertar_clientes`): `cliente` (20000 filas) + subtipos `cliente_distribuidor` / `cliente_exportador` + `permiso_exportacion`.
+5. **Salas y transportistas** (`insertar_salas_y_transportistas`): `sala_venta` (15), `transportista` (6), `transportista_localidad` (incluye cobertura General Alvear 5505 para transportista 1).
+6. **Empleados** (`insertar_empleados`): `empleado` (150 filas, repartidas entre salas).
+7. **Análisis de calidad** (`insertar_analisis`): `analisis_calidad` (2 análisis por lote_uva, 48 filas).
+8. **Cambios de precio** (`insertar_cambios_precio`): `auditoria_precio` (5 filas, trigger activo, no determinista por `DEFAULT now()`).
+9. **Stock inicial** (`poblar_stock`): `stock_deposito` (una fila por vino) y `stock_sala` (una fila por par sala-vino).
+10. **Movimientos de stock** (`poblar_movimientos_stock`): `ingreso` + `renglon_ingreso` (40 ingresos) y `transferencia` + `renglon_transferencia` (600 transferencias) que justifican el stock inicial.
+11. **Movimientos recientes** (`poblar_movimientos_recientes`): 40 ingresos + 120 transferencias con estados mixtos para poblar S4, S5, S7 e I1.
+12. **Ventas masivas** (`generar_ventas`): `comprobante` (170000, INSERT por lotes) y `renglon_comprobante` (680366, vía `COPY`).
+13. **Recálculo de totales** (`recalcular_totales_comprobante`): actualiza `subtotal`/`descuento`/`total` de `comprobante` mientras los triggers siguen deshabilitados.
+14. **`03_post_carga.sql`**: habilita triggers, valida `tgenabled='O'`, ajusta secuencias con `setval`, `REFRESH MATERIALIZED VIEW`, `ANALYZE`.
+15. `SET CONSTRAINTS ALL IMMEDIATE` (forza los constraint triggers diferidos `ctg_*`).
+16. **`02b_gate.sql`**: gate de integridad; aborta si algún control devuelve filas.
+17. **`COMMIT`** único al final.
 
 ## Volúmenes de referencia (Corrida 1 verificada)
 
+- Clientes: 20000
+- Empleados: 150
 - Comprobantes: 170000
-- Renglones de comprobante: 680046
-- Duración total: ~97 s (gate `02b_gate.sql`: ~31 s)
+- Renglones de comprobante: 680366
+- Duración total: ~244 s (gate `02b_gate.sql`: ~37 s; versión base de 200 clientes: ~97 s)
 - Triggers de usuario deshabilitados al final: 0 (debe ser 0)
