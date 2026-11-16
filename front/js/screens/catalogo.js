@@ -67,7 +67,7 @@ function ocultarError(alerta) {
  * Renderiza el detalle de un vino en el panel modal.
  * Muestra los valores tal como los devuelve la fuente, sin sumar ni calcular.
  */
-function renderizarDetalle(modal, detalle) {
+function renderizarDetalle(modal, detalle, signal) {
   const panel = modal.querySelector(".detalle-panel");
   vaciar(panel);
 
@@ -116,8 +116,12 @@ function renderizarDetalle(modal, detalle) {
   const btnCerrar = el("button", { clase: "btn btn-primary", texto: "Cerrar" });
   btnCerrar.addEventListener("click", () => {
     modal.hidden = true;
-  });
+  }, { signal });
   panel.appendChild(btnCerrar);
+
+  const btnEditar = el("a", { clase: "btn-link", texto: "Editar" });
+  btnEditar.href = `#/vinos/editar?cod=${encodeURIComponent(detalle.cod_vino)}`;
+  panel.appendChild(btnEditar);
 
   modal.hidden = false;
 }
@@ -125,7 +129,7 @@ function renderizarDetalle(modal, detalle) {
 /**
  * Crea y devuelve el panel modal de detalle (oculto por defecto).
  */
-function crearModalDetalle() {
+function crearModalDetalle(signal) {
   const overlay = el("div", { clase: "detalle-modal-overlay" });
   overlay.hidden = true;
 
@@ -137,7 +141,7 @@ function crearModalDetalle() {
     if (ev.target === overlay) {
       overlay.hidden = true;
     }
-  });
+  }, { signal });
 
   return overlay;
 }
@@ -150,7 +154,7 @@ function crearModalDetalle() {
  * @param {object} datos - { items, page, page_size, total }
  */
 function renderizarListado(ctx, datos) {
-  const { contenedor, modal, paginador } = ctx;
+  const { contenedor, modal, paginador, signal } = ctx;
 
   // Borra la tabla previa antes de crear la nueva
   const tablaPrevia = contenedor.querySelector(".tabla-vinos");
@@ -189,7 +193,7 @@ function renderizarListado(ctx, datos) {
 
     const tdAccion = el("td");
     const btnDetalle = el("button", { clase: "btn btn-sm", texto: "Detalle" });
-    btnDetalle.addEventListener("click", () => ctx.onDetalle(vino.cod_vino));
+    btnDetalle.addEventListener("click", () => ctx.onDetalle(vino.cod_vino), { signal });
     tdAccion.appendChild(btnDetalle);
     tr.appendChild(tdAccion);
 
@@ -207,13 +211,13 @@ function renderizarListado(ctx, datos) {
 
   const btnAnterior = el("button", { clase: "btn btn-sm btn-paginador", texto: "Anterior" });
   btnAnterior.disabled = paginaActual <= 1;
-  btnAnterior.addEventListener("click", () => ctx.onPagina(paginaActual - 1));
+  btnAnterior.addEventListener("click", () => ctx.onPagina(paginaActual - 1), { signal });
 
   const lblPagina = el("span", { clase: "pagina-actual", texto: `Página ${paginaActual} de ${totalPaginas}` });
 
   const btnSiguiente = el("button", { clase: "btn btn-sm btn-paginador", texto: "Siguiente" });
   btnSiguiente.disabled = paginaActual >= totalPaginas;
-  btnSiguiente.addEventListener("click", () => ctx.onPagina(paginaActual + 1));
+  btnSiguiente.addEventListener("click", () => ctx.onPagina(paginaActual + 1), { signal });
 
   paginador.appendChild(btnAnterior);
   paginador.appendChild(lblPagina);
@@ -224,7 +228,7 @@ function renderizarListado(ctx, datos) {
  * Exportada: inicia la pantalla del catálogo dentro del contenedor dado.
  * Sin efectos al importar. Si ya había una pantalla montada, su listener se cancela.
  */
-export async function iniciarCatalogo(contenedor) {
+export function iniciarCatalogo(contenedor) {
   // Cancela el montaje anterior: sus listeners (AbortSignal) dejan de responder
   if (montajeActual) {
     montajeActual.abort();
@@ -254,8 +258,12 @@ export async function iniciarCatalogo(contenedor) {
   contenedor.appendChild(alerta);
   contenedor.appendChild(carga);
 
-  const modal = crearModalDetalle();
+  const modal = crearModalDetalle(signal);
   contenedor.appendChild(modal);
+
+  const btnNuevo = el("a", { clase: "btn-link", texto: "Nuevo vino" });
+  btnNuevo.href = "#/vinos/nuevo";
+  contenedor.appendChild(btnNuevo);
 
   // Formulario de filtros
   const form = el("form", { clase: "filtros-form" });
@@ -299,6 +307,7 @@ export async function iniciarCatalogo(contenedor) {
     modal,
     paginador,
     alerta,
+    signal,
     onPagina: (nueva) => {
       if (!nueva || nueva < 1) return;
       estado.page = nueva;
@@ -309,7 +318,7 @@ export async function iniciarCatalogo(contenedor) {
       try {
         const detalle = await obtenerDetalleVino(cod);
         if (signal.aborted) return;
-        renderizarDetalle(modal, detalle);
+        renderizarDetalle(modal, detalle, signal);
       } catch (error) {
         if (signal.aborted) return;
         mostrarError(alerta, error.message);
@@ -384,7 +393,14 @@ export async function iniciarCatalogo(contenedor) {
     { signal }
   );
 
-  await cargarSelectores();
-  if (signal.aborted) return;
-  await cargarListado();
+  cargarSelectores();
+  cargarListado();
+
+  return {
+    destruir() {
+      controlador.abort();
+      montajeActual = null;
+      vaciar(contenedor);
+    },
+  };
 }
