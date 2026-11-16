@@ -550,3 +550,277 @@ def test_rn11_procesar_transferencia_no_terminada(
     row = cur.fetchone()
     assert row is not None
     assert row["estado"] == "en_confeccion"
+
+
+# ---------------------------------------------------------------------------
+# Caso 4: RN-05 Composición de varietales suma != 100 (POST /vinos)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.integration
+def test_rn05_composicion_vino_no_suma_100(
+    cliente_real: TestClient,
+    db_conn_commit: psycopg.Connection,
+):
+    """RN-05: Composición de cepas cuya suma != 100 → 409, P0001, no se crea vino.
+
+    El constraint trigger diferido ctg_vino_cepa_suma_100 (y ctg_vino_composicion)
+    se evalúa al COMMIT y rechaza la composición 60 + 30 = 90. Todo se revierte.
+    El payload pasa Pydantic (cada porcentaje entre 0 y 100), la violación es en
+    PostgreSQL real.
+    """
+    sufijo = "05"
+    cp = f"TEST{sufijo}"
+    cuit = f"999999999{sufijo.zfill(2)}"
+    nombre_localidad = f"Localidad Test {sufijo}"
+    nombre_bodega = f"TEST Bodega {sufijo}"
+    nombre_cepa_a = f"TEST Cepa A {sufijo}"
+    nombre_cepa_b = f"TEST Cepa B {sufijo}"
+    nombre_vino = f"TEST Vino Composicion {sufijo}"
+
+    db_conn_commit.execute(
+        "INSERT INTO localidad (codigo_postal, nombre, provincia, encargado_regional) "
+        "VALUES (%s, %s, 'Mendoza', 'Encargado') ON CONFLICT DO NOTHING",
+        (cp, nombre_localidad),
+    )
+    db_conn_commit.execute(
+        "INSERT INTO bodega (cuit, razon_social, domicilio) "
+        "VALUES (%s, %s, 'Ruta Test') ON CONFLICT DO NOTHING",
+        (cuit, nombre_bodega),
+    )
+    db_conn_commit.execute(
+        "INSERT INTO cepa (nombre, tipo) VALUES (%s, 'tinta') ON CONFLICT DO NOTHING",
+        (nombre_cepa_a,),
+    )
+    db_conn_commit.execute(
+        "INSERT INTO cepa (nombre, tipo) VALUES (%s, 'tinta') ON CONFLICT DO NOTHING",
+        (nombre_cepa_b,),
+    )
+
+    cur = db_conn_commit.cursor()
+    cur.execute(
+        "SELECT id_cepa FROM cepa WHERE nombre IN (%s, %s) ORDER BY id_cepa",
+        (nombre_cepa_a, nombre_cepa_b),
+    )
+    filas = cur.fetchall()
+    id_cepa_a = filas[0]["id_cepa"]
+    id_cepa_b = filas[1]["id_cepa"]
+
+    resp = cliente_real.post(
+        "/vinos",
+        json={
+            "nombre": nombre_vino,
+            "tipo": "tinto",
+            "anada": 2021,
+            "volumen_ml": 750,
+            "graduacion": "14.00",
+            "precio": "10000.00",
+            "cuit_bodega": cuit,
+            "composicion": [
+                {"id_cepa": id_cepa_a, "porcentaje": "60.00"},
+                {"id_cepa": id_cepa_b, "porcentaje": "30.00"},
+            ],
+        },
+    )
+
+    assert resp.status_code == 409, resp.text
+    body = resp.json()
+    assert body["error"]["sqlstate"] == "P0001"
+    assert "RN-05" in body["error"]["mensaje"], body["error"]["mensaje"]
+
+    # El constraint trigger falla al COMMIT: toda la transacción se revierte,
+    # no queda vino ni composición parcial.
+    cur.execute(
+        "SELECT cod_vino FROM vino WHERE nombre = %s",
+        (nombre_vino,),
+    )
+    assert cur.fetchone() is None
+
+
+# ---------------------------------------------------------------------------
+# Caso 5: RN-12 Bloqueo de renglones fuera de confeccion
+# (POST /ingresos/{cod}/renglones)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.integration
+def test_rn12_agregar_renglon_ingreso_no_en_confeccion(
+    cliente_real: TestClient,
+    db_conn_commit: psycopg.Connection,
+):
+    """RN-12: Agregar renglón a un ingreso ya terminado → 409, P0001, no queda renglón.
+
+    Se crea un ingreso en confección, se termina y luego se intenta agregar
+    un renglón: el trigger trg_renglon_ingreso_confeccion lo rechaza porque
+    la cabecera ya no está en_confeccion.
+    """
+    sufijo = "06"
+    cp = f"TEST{sufijo}"
+    cuit_bodega = f"999999999{sufijo.zfill(2)}"
+    cuit_transp = f"888888888{sufijo.zfill(2)}"
+    nombre_localidad = f"Localidad Test {sufijo}"
+    nombre_bodega = f"TEST Bodega {sufijo}"
+    nombre_transportista = f"TEST Transportista {sufijo}"
+    nombre_cepa = f"TEST Cepa {sufijo}"
+    nombre_vino = f"TEST Vino Ingreso {sufijo}"
+
+    db_conn_commit.execute(
+        "INSERT INTO localidad (codigo_postal, nombre, provincia, encargado_regional) "
+        "VALUES (%s, %s, 'Mendoza', 'Encargado') ON CONFLICT DO NOTHING",
+        (cp, nombre_localidad),
+    )
+    db_conn_commit.execute(
+        "INSERT INTO bodega (cuit, razon_social, domicilio) "
+        "VALUES (%s, %s, 'Ruta Test') ON CONFLICT DO NOTHING",
+        (cuit_bodega, nombre_bodega),
+    )
+    cur = db_conn_commit.cursor()
+    cur.execute(
+        """
+        INSERT INTO transportista (razon_social, cuit, email, telefono, domicilio)
+        VALUES (%s, %s, 'test@test.com', '123456789', 'Dir Test')
+        ON CONFLICT (cuit) DO NOTHING
+        RETURNING cod_transportista
+        """,
+        (nombre_transportista, cuit_transp),
+    )
+    cod_transportista = cur.fetchone()["cod_transportista"]
+
+    db_conn_commit.execute(
+        "INSERT INTO cepa (nombre, tipo) VALUES (%s, 'tinta') ON CONFLICT DO NOTHING",
+        (nombre_cepa,),
+    )
+    cur.execute("SELECT id_cepa FROM cepa WHERE nombre = %s", (nombre_cepa,))
+    id_cepa = cur.fetchone()["id_cepa"]
+
+    with db_conn_commit.transaction():
+        cur.execute(
+            """
+            INSERT INTO vino (nombre, tipo, anada, volumen_ml, graduacion, precio, cuit_bodega)
+            VALUES (%s, 'tinto', 2021, 750, 14.0, 10000.00, %s)
+            RETURNING cod_vino;
+            """,
+            (nombre_vino, cuit_bodega),
+        )
+        cod_vino = cur.fetchone()["cod_vino"]
+        cur.execute(
+            "INSERT INTO vino_cepa (cod_vino, id_cepa, porcentaje) VALUES (%s, %s, 100)",
+            (cod_vino, id_cepa),
+        )
+
+    cur.execute(
+        """
+        INSERT INTO ingreso (fecha, cod_transportista, cuit_bodega)
+        VALUES (CURRENT_DATE, %s, %s)
+        RETURNING cod_ingreso;
+        """,
+        (cod_transportista, cuit_bodega),
+    )
+    cod_ingreso = cur.fetchone()["cod_ingreso"]
+
+    # Terminar el ingreso: en_confeccion -> terminado (transición válida).
+    resp = cliente_real.post(f"/ingresos/{cod_ingreso}/terminar")
+    assert resp.status_code == 200, resp.text
+
+    # Intentar agregar renglón a ingreso ya terminado → RN-12
+    resp = cliente_real.post(
+        f"/ingresos/{cod_ingreso}/renglones",
+        json={"cod_vino": cod_vino, "cantidad": 10},
+    )
+    assert resp.status_code == 409, resp.text
+    body = resp.json()
+    assert body["error"]["sqlstate"] == "P0001"
+    assert "RN-12" in body["error"]["mensaje"], body["error"]["mensaje"]
+
+    # Verificar que no quedó renglón (la transacción falló, todo se revirtió).
+    cur.execute(
+        "SELECT COUNT(*) AS n FROM renglon_ingreso WHERE cod_ingreso = %s",
+        (cod_ingreso,),
+    )
+    assert cur.fetchone()["n"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Caso 6: RN-14 No borrar vino con movimientos/stock (DELETE /vinos/{cod})
+# ---------------------------------------------------------------------------
+
+@pytest.mark.integration
+def test_rn14_eliminar_vino_con_stock_sala(
+    cliente_real: TestClient,
+    db_conn_commit: psycopg.Connection,
+    db_owner: psycopg.Connection,
+):
+    """RN-14: Borrar vino con stock de sala asociado → 409, 23503, vino sigue existiendo.
+
+    La FK fk_stock_sala_vino (ON DELETE RESTRICT) impide el borrado y la API
+    la traduce a 409. El vino y su stock permanecen intactos.
+    """
+    sufijo = "08"
+    cp = f"TEST{sufijo}"
+    cuit = f"999999999{sufijo.zfill(2)}"
+    nombre_localidad = f"Localidad Test {sufijo}"
+    nombre_bodega = f"TEST Bodega {sufijo}"
+    nombre_cepa = f"TEST Cepa {sufijo}"
+    nombre_vino = f"TEST Vino Stock Borrar {sufijo}"
+
+    db_conn_commit.execute(
+        "INSERT INTO localidad (codigo_postal, nombre, provincia, encargado_regional) "
+        "VALUES (%s, %s, 'Mendoza', 'Encargado') ON CONFLICT DO NOTHING",
+        (cp, nombre_localidad),
+    )
+    db_conn_commit.execute(
+        "INSERT INTO bodega (cuit, razon_social, domicilio) "
+        "VALUES (%s, %s, 'Ruta Test') ON CONFLICT DO NOTHING",
+        (cuit, nombre_bodega),
+    )
+    db_conn_commit.execute(
+        "INSERT INTO sala_venta (calle, numero, dia_cierre, codigo_postal) "
+        "VALUES (%s, '1', 'lunes', %s) ON CONFLICT DO NOTHING",
+        (f"TEST Calle {sufijo}", cp),
+    )
+    db_conn_commit.execute(
+        "INSERT INTO cepa (nombre, tipo) VALUES (%s, 'tinta') ON CONFLICT DO NOTHING",
+        (nombre_cepa,),
+    )
+
+    cur = db_conn_commit.cursor()
+    cur.execute("SELECT id_sala FROM sala_venta WHERE calle = %s", (f"TEST Calle {sufijo}",))
+    id_sala = cur.fetchone()["id_sala"]
+    cur.execute("SELECT id_cepa FROM cepa WHERE nombre = %s", (nombre_cepa,))
+    id_cepa = cur.fetchone()["id_cepa"]
+
+    with db_conn_commit.transaction():
+        cur.execute(
+            """
+            INSERT INTO vino (nombre, tipo, anada, volumen_ml, graduacion, precio, cuit_bodega)
+            VALUES (%s, 'tinto', 2021, 750, 14.0, 10000.00, %s)
+            RETURNING cod_vino;
+            """,
+            (nombre_vino, cuit),
+        )
+        cod_vino = cur.fetchone()["cod_vino"]
+        cur.execute(
+            "INSERT INTO vino_cepa (cod_vino, id_cepa, porcentaje) VALUES (%s, %s, 100)",
+            (cod_vino, id_cepa),
+        )
+
+    # Stock de sala: solo el propietario puede escribir en stock_sala.
+    db_owner.execute(
+        "INSERT INTO stock_sala (id_sala, cod_vino, cantidad) VALUES (%s, %s, 5)",
+        (id_sala, cod_vino),
+    )
+
+    resp = cliente_real.delete(f"/vinos/{cod_vino}")
+    assert resp.status_code == 409, resp.text
+    body = resp.json()
+    assert body["error"]["sqlstate"] == "23503"
+    assert body["error"]["mensaje"] == "No se puede eliminar: el registro tiene datos asociados."
+
+    # El vino sigue existiendo: no se borró nada.
+    cur.execute("SELECT cod_vino FROM vino WHERE cod_vino = %s", (cod_vino,))
+    assert cur.fetchone() is not None
+
+    # El stock de sala sigue intacto.
+    cur.execute(
+        "SELECT cantidad FROM stock_sala WHERE id_sala = %s AND cod_vino = %s",
+        (id_sala, cod_vino),
+    )
+    assert cur.fetchone()["cantidad"] == 5
