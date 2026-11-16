@@ -190,4 +190,74 @@ def test_value_error_de_la_consulta_se_traduce_a_422(client, monkeypatch):
     )
 
     assert resp.status_code == 422
-    assert resp.json()["detail"] == "fecha_desde no puede ser posterior a fecha_hasta"
+    body = resp.json()
+    mensaje = body.get("detail") or body.get("error", {}).get("mensaje")
+    assert mensaje == "fecha_desde no puede ser posterior a fecha_hasta"
+
+
+# ---------------------------------------------------------------------------
+# Trazabilidad de un vino (contrato §4.6)
+# ---------------------------------------------------------------------------
+
+
+def test_trazabilidad_vino_ok(client, monkeypatch):
+    vino = {
+        "cod_vino": 10,
+        "nombre": "Malbec Reserva",
+        "cuit_bodega": "30123456789",
+    }
+    lotes = [
+        {
+            "id_lote": 7,
+            "nro_lote": 1007,
+            "campania": 2021,
+            "fecha_cosecha": "2021-03-12",
+            "kilos": "5400.00",
+            "id_finca": 2,
+            "finca": "Finca El Atuel",
+            "nro_parcela": 4,
+            "cepa": "Malbec",
+        }
+    ]
+    monkeypatch.setattr(router_reportes, "obtener_vino", lambda conn, cod: vino)
+    monkeypatch.setattr(router_reportes, "trazabilidad_vino", lambda conn, cod: lotes)
+
+    resp = client.get("/reportes/trazabilidad/10")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["cod_vino"] == 10
+    assert data["nombre"] == "Malbec Reserva"
+    assert data["cuit_bodega"] == "30123456789"
+    assert data["lotes"] == lotes
+
+
+def test_trazabilidad_vino_sin_lotes_devuelve_lista_vacia(client, monkeypatch):
+    vino = {
+        "cod_vino": 10,
+        "nombre": "Malbec Reserva",
+        "cuit_bodega": "30123456789",
+    }
+    monkeypatch.setattr(router_reportes, "obtener_vino", lambda conn, cod: vino)
+    monkeypatch.setattr(router_reportes, "trazabilidad_vino", lambda conn, cod: [])
+
+    resp = client.get("/reportes/trazabilidad/10")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["cod_vino"] == 10
+    assert data["lotes"] == []
+
+
+def test_trazabilidad_vino_inexistente_404(client, monkeypatch):
+    monkeypatch.setattr(router_reportes, "obtener_vino", lambda conn, cod: None)
+
+    resp = client.get("/reportes/trazabilidad/999")
+
+    assert resp.status_code == 404
+
+
+@pytest.mark.parametrize("cod", ["0", "-1", "abc"])
+def test_trazabilidad_vino_codigo_invalido_422(client, cod):
+    resp = client.get(f"/reportes/trazabilidad/{cod}")
+    assert resp.status_code == 422
