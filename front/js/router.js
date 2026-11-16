@@ -149,7 +149,7 @@ function resolverRuta() {
  */
 export function initRouter() {
   registrarRuta("#/vinos", (contenedor) => {
-    iniciarCatalogo(contenedor);
+    return iniciarCatalogo(contenedor);
   });
 
   registrarRuta(
