@@ -11,9 +11,8 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 import psycopg
 
 from app.db.pool import get_conn
-from app.db.queries.vinos import crear_vino, eliminar_vino, listar_vinos
-from app.schemas.modelos import VinoCreate
 from app.db.queries.vinos import (
+    actualizar_vino,
     crear_vino,
     eliminar_vino,
     listar_vinos,
@@ -21,6 +20,7 @@ from app.db.queries.vinos import (
     obtener_maridajes_vino,
     obtener_vino,
 )
+from app.schemas.modelos import VinoCreate
 
 router = APIRouter(prefix="/vinos", tags=["Vinos"])
 
@@ -77,6 +77,37 @@ def obtener_vino_endpoint(
 
     Son tres consultas de lectura. No hay transacción porque no escriben.
     """
+    vino = obtener_vino(conn, cod_vino)
+    if vino is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Vino {cod_vino} no encontrado",
+        )
+    vino["composicion"] = obtener_composicion_vino(conn, cod_vino)
+    vino["maridajes"] = obtener_maridajes_vino(conn, cod_vino)
+    return vino
+
+
+@router.put("/{cod_vino}")
+def actualizar_vino_endpoint(
+    cod_vino: int = Path(..., gt=0),
+    datos: VinoCreate = ...,
+    conn: psycopg.Connection = Depends(get_conn),
+) -> dict:
+    """Actualiza un vino mediante un reemplazo completo (contrato §4.1)."""
+    payload = datos.model_dump()
+    try:
+        filas = actualizar_vino(conn, cod_vino, payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=str(exc),
+        ) from exc
+    if filas == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Vino {cod_vino} no encontrado",
+        )
     vino = obtener_vino(conn, cod_vino)
     if vino is None:
         raise HTTPException(

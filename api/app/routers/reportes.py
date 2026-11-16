@@ -13,15 +13,17 @@ from datetime import date
 from typing import Literal
 
 import psycopg
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 
 from app.db.pool import get_conn
 from app.db.queries.reportes import (
     top_vinos,
+    trazabilidad_vino,
     transportista_activo,
     ventas_por_sala,
     vinos_sin_stock,
 )
+from app.db.queries.vinos import obtener_vino
 
 router = APIRouter(prefix="/reportes", tags=["Reportes"])
 
@@ -88,3 +90,24 @@ def ventas_por_sala_endpoint(
         fecha_hasta=fecha_hasta,
     )
     return {"items": items}
+
+
+@router.get("/trazabilidad/{cod}")
+def trazabilidad_vino_endpoint(
+    cod: int = Path(..., gt=0),
+    conn: psycopg.Connection = Depends(get_conn),
+) -> dict:
+    """Cadena de trazabilidad de los lotes de uva de un vino (contrato §4.6)."""
+    vino = _o_422(obtener_vino, conn, cod)
+    if vino is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Vino {cod} no encontrado",
+        )
+    lotes = _o_422(trazabilidad_vino, conn, cod)
+    return {
+        "cod_vino": vino["cod_vino"],
+        "nombre": vino["nombre"],
+        "cuit_bodega": vino["cuit_bodega"],
+        "lotes": lotes,
+    }

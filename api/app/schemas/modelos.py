@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -84,4 +85,98 @@ class ComprobanteCreate(BaseModel):
                 "cantidades": [6, 2],
             }
         }
+    }
+
+
+class PermisoExportacion(BaseModel):
+    """Permiso de exportación para clientes exportadores."""
+
+    codigo: str = Field(min_length=1, max_length=20)
+    fecha_emision: date
+    fecha_vencimiento: date
+
+
+class DistribuidorData(BaseModel):
+    """Datos específicos de cliente distribuidor."""
+
+    zona_cobertura: str = Field(min_length=1, max_length=120)
+    nro_habilitacion: str = Field(min_length=1, max_length=30)
+
+
+class ExportadorData(BaseModel):
+    """Datos específicos de cliente exportador."""
+
+    pais_destino: str = Field(min_length=1, max_length=60)
+    permisos: list[PermisoExportacion] = Field(default_factory=list)
+
+
+class ClienteCreate(BaseModel):
+    """Payload de alta o reemplazo completo de cliente (POST/PUT /clientes)."""
+
+    apellido_razon_social: str = Field(min_length=1, max_length=150)
+    nombre: str | None = Field(default=None, max_length=100)
+    tipo_documento: Literal["DNI", "CUIT", "CUIL", "PASAPORTE"]
+    nro_documento: str = Field(min_length=1, max_length=11)
+    direccion: str = Field(min_length=1, max_length=200)
+    codigo_postal: str = Field(min_length=1, max_length=8)
+    tipo_cliente: Literal["socio", "distribuidor", "exportador"]
+    distribuidor: DistribuidorData | None = None
+    exportador: ExportadorData | None = None
+
+    model_config = {
+        "extra": "forbid",
+        "json_schema_extra": {
+            "example": {
+                "apellido_razon_social": "Exportadora Sur S.A.",
+                "nombre": None,
+                "tipo_documento": "CUIT",
+                "nro_documento": "30987654321",
+                "direccion": "Av. Ejemplo 500",
+                "codigo_postal": "M5600",
+                "tipo_cliente": "exportador",
+                "exportador": {
+                    "pais_destino": "Brasil",
+                    "permisos": [
+                        {
+                            "codigo": "PE-001",
+                            "fecha_emision": "2026-01-01",
+                            "fecha_vencimiento": "2027-01-01",
+                        }
+                    ],
+                },
+            }
+        },
+    }
+
+
+class IngresoCreate(BaseModel):
+    """Payload de alta de ingreso (POST /ingresos)."""
+
+    fecha: date
+    cod_transportista: int = Field(gt=0)
+    cuit_bodega: str = Field(min_length=11, max_length=11)
+
+    model_config = {
+        "extra": "forbid",
+        "json_schema_extra": {
+            "example": {
+                "fecha": "2026-11-03",
+                "cod_transportista": 3,
+                "cuit_bodega": "30123456789",
+            }
+        },
+    }
+
+
+class RenglonIngresoCreate(BaseModel):
+    """Payload de renglón de ingreso (POST /ingresos/{cod}/renglones)."""
+
+    cod_vino: int = Field(gt=0)
+    cantidad: int = Field(gt=0)
+
+    model_config = {
+        "extra": "forbid",
+        "json_schema_extra": {
+            "example": {"cod_vino": 10, "cantidad": 120}
+        },
     }
