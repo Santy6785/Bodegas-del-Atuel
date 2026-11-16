@@ -227,5 +227,46 @@ BEGIN
         RAISE EXCEPTION 'Fallo en control C13c: % transferencia(s) con fecha futura', v_count
             USING ERRCODE = 'check_violation';
     END IF;
+
+    -- C3b: Gate de filas huérfanas en TODAS las claves foráneas
+    DECLARE
+        r RECORD;
+        where_nn text;
+        where_eq text;
+        q text;
+        n bigint;
+        i int;
+    BEGIN
+        FOR r IN
+            SELECT c.conname AS conname,
+                   c.conrelid::regclass::text AS th,
+                   c.confrelid::regclass::text AS tp,
+                   array_agg(ah.attname ORDER BY u.ord) AS ch,
+                   array_agg(ap.attname ORDER BY u.ord) AS cp
+            FROM pg_constraint c
+            JOIN LATERAL unnest(c.conkey, c.confkey) WITH ORDINALITY AS u(h, p, ord) ON true
+            JOIN pg_attribute ah ON ah.attrelid = c.conrelid AND ah.attnum = u.h
+            JOIN pg_attribute ap ON ap.attrelid = c.confrelid AND ap.attnum = u.p
+            WHERE c.contype = 'f' AND c.connamespace = 'public'::regnamespace
+            GROUP BY c.conname, c.conrelid, c.confrelid
+        LOOP
+            where_nn := '';
+            where_eq := '';
+            FOR i IN 1..array_length(r.ch, 1) LOOP
+                IF i > 1 THEN
+                    where_nn := where_nn || ' AND ';
+                    where_eq := where_eq || ' AND ';
+                END IF;
+                where_nn := where_nn || format('h.%I IS NOT NULL', r.ch[i]);
+                where_eq := where_eq || format('h.%I = p.%I', r.ch[i], r.cp[i]);
+            END LOOP;
+            q := format('SELECT count(*) FROM %s h WHERE %s AND NOT EXISTS (SELECT 1 FROM %s p WHERE %s)', r.th, where_nn, r.tp, where_eq);
+            EXECUTE q INTO n;
+            IF n > 0 THEN
+                RAISE EXCEPTION 'Fallo en control C3b: % huérfanas en %', n, r.conname
+                    USING ERRCODE = 'check_violation';
+            END IF;
+        END LOOP;
+    END;
 END;
 $$;

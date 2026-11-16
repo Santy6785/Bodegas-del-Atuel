@@ -183,3 +183,55 @@ SELECT tr.* FROM transferencia tr WHERE tr.estado = 'procesado' AND NOT EXISTS (
 SELECT * FROM comprobante WHERE fecha > CURRENT_DATE;
 SELECT * FROM ingreso WHERE fecha > CURRENT_DATE;
 SELECT * FROM transferencia WHERE fecha_confeccion > CURRENT_DATE;
+
+-- C3b: Filas huérfanas en TODAS las claves foráneas
+CREATE OR REPLACE FUNCTION pg_temp.check_fk_orphans()
+RETURNS TABLE(fk_name text, tabla_hija text, tabla_padre text, huerfanas bigint)
+LANGUAGE plpgsql AS $$
+DECLARE
+    r RECORD;
+    where_nn text;
+    where_eq text;
+    q text;
+    n bigint;
+    i int;
+BEGIN
+    FOR r IN
+        SELECT c.conname AS fk_name,
+               c.conrelid::regclass::text AS th,
+               c.confrelid::regclass::text AS tp,
+               array_agg(ah.attname ORDER BY u.ord) AS ch,
+               array_agg(ap.attname ORDER BY u.ord) AS cp
+        FROM pg_constraint c
+        JOIN LATERAL unnest(c.conkey, c.confkey) WITH ORDINALITY AS u(h, p, ord) ON true
+        JOIN pg_attribute ah ON ah.attrelid = c.conrelid AND ah.attnum = u.h
+        JOIN pg_attribute ap ON ap.attrelid = c.confrelid AND ap.attnum = u.p
+        WHERE c.contype = 'f' AND c.connamespace = 'public'::regnamespace
+        GROUP BY c.conname, c.conrelid, c.confrelid
+    LOOP
+        where_nn := '';
+        where_eq := '';
+        FOR i IN 1..array_length(r.ch, 1) LOOP
+            IF i > 1 THEN
+                where_nn := where_nn || ' AND ';
+                where_eq := where_eq || ' AND ';
+            END IF;
+            where_nn := where_nn || format('h.%I IS NOT NULL', r.ch[i]);
+            where_eq := where_eq || format('h.%I = p.%I', r.ch[i], r.cp[i]);
+        END LOOP;
+        q := format('SELECT count(*) FROM %s h WHERE %s AND NOT EXISTS (SELECT 1 FROM %s p WHERE %s)', r.th, where_nn, r.tp, where_eq);
+        EXECUTE q INTO n;
+        fk_name := r.fk_name; tabla_hija := r.th; tabla_padre := r.tp; huerfanas := n;
+        RETURN NEXT;
+    END LOOP;
+END;
+$$;
+
+SELECT fk_name, tabla_hija, tabla_padre, huerfanas
+FROM pg_temp.check_fk_orphans()
+WHERE huerfanas > 0
+ORDER BY fk_name;
+
+SELECT count(*) AS fks_revisadas
+FROM pg_constraint
+WHERE contype = 'f' AND connamespace = 'public'::regnamespace;
