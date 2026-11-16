@@ -85,6 +85,45 @@ def _app_de_prueba() -> FastAPI:
     def nomap():
         raise pge.InsufficientPrivilege("insufficient privilege")
 
+    # --- Rutas adicionales para verificar el contrato completo ---
+    # (status_code, formato cuerpo, sqlstate, mensaje exacto, restriccion)
+
+    @app.post("/unique-full")
+    def unique_full():
+        raise pge.UniqueViolation("duplicate key")
+
+    @app.post("/check-full")
+    def check_full():
+        raise pge.CheckViolation("check violated")
+
+    @app.post("/notnull-full")
+    def notnull_full():
+        raise pge.NotNullViolation("null value")
+
+    @app.post("/invalidtext-full")
+    def invalidtext_full():
+        raise pge.InvalidTextRepresentation("invalid text")
+
+    @app.post("/serialization-full")
+    def serialization_full():
+        raise pge.SerializationFailure("serialization failure")
+
+    @app.post("/deadlock-full")
+    def deadlock_full():
+        raise pge.DeadlockDetected("deadlock detected")
+
+    @app.post("/fk-full")
+    def fk_full_post():
+        raise pge.ForeignKeyViolation("fk")
+
+    @app.delete("/fk-full")
+    def fk_full_delete():
+        raise pge.ForeignKeyViolation("fk")
+
+    @app.post("/nomap-full")
+    def nomap_full():
+        raise pge.InsufficientPrivilege("insufficient privilege")
+
     return app
 
 
@@ -450,3 +489,132 @@ def test_salud_operational_error_sigue_cuerpo_propio(real_app_client: TestClient
         app.dependency_overrides.clear()
     assert resp.status_code == 503
     assert resp.json() == {"estado": "error", "base_de_datos": "inaccesible"}
+
+
+# ---------------------------------------------------------------------------
+# Contrato completo por SQLSTATE (Sección 6 del TP)
+# ---------------------------------------------------------------------------
+# Cada prueba valida por HTTP (TestClient -> handler real de FastAPI):
+#   status_code, formato {"error": {"sqlstate","mensaje","restriccion"}},
+#   sqlstate exacto, mensaje exacto según api/app/errors.py y restriccion.
+# Los mensajes son los reales de errors.py (no se parcha errors.py; las
+# discrepancias con la tabla del TP se documentan en el informe final).
+
+
+def _assert_cuerpo_contrato(body: dict) -> None:
+    """Verifica el formato anidado exacto del contrato §1.1."""
+    assert set(body.keys()) == {"error"}
+    assert set(body["error"].keys()) == {"sqlstate", "mensaje", "restriccion"}
+
+
+def test_23505_unique_formato_completo(app_client: TestClient):
+    """23505 (Unicidad) -> 409, mensaje de errors.py, restriccion None."""
+    resp = app_client.post("/unique-full")
+    assert resp.status_code == 409
+    body = resp.json()
+    _assert_cuerpo_contrato(body)
+    assert body["error"]["sqlstate"] == "23505"
+    assert body["error"]["mensaje"] == "Ya existe un registro con esos datos."
+    assert body["error"]["restriccion"] is None
+
+
+def test_23503_delete_formato_completo(app_client: TestClient):
+    """23503 FK en DELETE -> 409, mensaje DELETE, restriccion None."""
+    resp = app_client.delete("/fk-full")
+    assert resp.status_code == 409
+    body = resp.json()
+    _assert_cuerpo_contrato(body)
+    assert body["error"]["sqlstate"] == "23503"
+    assert body["error"]["mensaje"] == "No se puede eliminar: el registro tiene datos asociados."
+    assert body["error"]["restriccion"] is None
+
+
+def test_23503_post_formato_completo(app_client: TestClient):
+    """23503 FK en POST (no DELETE) -> 422, mensaje no-DELETE, restriccion None."""
+    resp = app_client.post("/fk-full")
+    assert resp.status_code == 422
+    body = resp.json()
+    _assert_cuerpo_contrato(body)
+    assert body["error"]["sqlstate"] == "23503"
+    assert body["error"]["mensaje"] == "El dato referenciado no existe."
+    assert body["error"]["restriccion"] is None
+
+
+def test_23514_check_formato_completo(app_client: TestClient):
+    """23514 (CHECK/dominio) -> 422, mensaje de errors.py, restriccion None."""
+    resp = app_client.post("/check-full")
+    assert resp.status_code == 422
+    body = resp.json()
+    _assert_cuerpo_contrato(body)
+    assert body["error"]["sqlstate"] == "23514"
+    assert body["error"]["mensaje"] == "Un valor no cumple una restricción de dominio."
+    assert body["error"]["restriccion"] is None
+
+
+def test_23502_notnull_formato_completo(app_client: TestClient):
+    """23502 (NOT NULL) -> 422, mensaje de errors.py, restriccion None."""
+    resp = app_client.post("/notnull-full")
+    assert resp.status_code == 422
+    body = resp.json()
+    _assert_cuerpo_contrato(body)
+    assert body["error"]["sqlstate"] == "23502"
+    assert body["error"]["mensaje"] == "Falta un dato obligatorio."
+    assert body["error"]["restriccion"] is None
+
+
+def test_22p02_invalidtext_formato_completo(app_client: TestClient):
+    """22P02 (representación inválida) -> 400, mensaje de errors.py, restriccion None."""
+    resp = app_client.post("/invalidtext-full")
+    assert resp.status_code == 400
+    body = resp.json()
+    _assert_cuerpo_contrato(body)
+    assert body["error"]["sqlstate"] == "22P02"
+    assert body["error"]["mensaje"] == "Formato inválido para un dato."
+    assert body["error"]["restriccion"] is None
+
+
+def test_p0001_raise_formato_completo(app_client: TestClient):
+    """P0001 (RAISE EXCEPTION negocio) -> 409, mensaje original intacto, restriccion None."""
+    resp = app_client.post("/raise")
+    assert resp.status_code == 409
+    body = resp.json()
+    _assert_cuerpo_contrato(body)
+    assert body["error"]["sqlstate"] == "P0001"
+    assert body["error"]["mensaje"] == "Stock insuficiente del vino 10 en la sala 1 (RN-09)"
+    assert body["error"]["restriccion"] is None
+
+
+def test_40001_serialization_formato_completo(app_client: TestClient):
+    """40001 (serialización) -> 503, Retry-After: 1, mensaje de errors.py, restriccion None."""
+    resp = app_client.post("/serialization-full")
+    assert resp.status_code == 503
+    assert resp.headers["Retry-After"] == "1"
+    body = resp.json()
+    _assert_cuerpo_contrato(body)
+    assert body["error"]["sqlstate"] == "40001"
+    assert body["error"]["mensaje"] == "La operación no pudo completarse por concurrencia. Intente nuevamente."
+    assert body["error"]["restriccion"] is None
+
+
+def test_40p01_deadlock_formato_completo(app_client: TestClient):
+    """40P01 (deadlock) -> 503, Retry-After: 1, mensaje de errors.py, restriccion None."""
+    resp = app_client.post("/deadlock-full")
+    assert resp.status_code == 503
+    assert resp.headers["Retry-After"] == "1"
+    body = resp.json()
+    _assert_cuerpo_contrato(body)
+    assert body["error"]["sqlstate"] == "40P01"
+    assert body["error"]["mensaje"] == "La operación no pudo completarse por concurrencia. Intente nuevamente."
+    assert body["error"]["restriccion"] is None
+
+
+def test_42601_no_mapeado_formato_completo(app_client: TestClient):
+    """SQLSTATE no mapeado (42601) -> 500, mensaje genérico, no filtra texto técnico."""
+    resp = app_client.post("/nomap-full")
+    assert resp.status_code == 500
+    body = resp.json()
+    _assert_cuerpo_contrato(body)
+    assert body["error"]["sqlstate"] == "42501"
+    assert body["error"]["mensaje"] == "Error interno de la base de datos."
+    assert body["error"]["restriccion"] is None
+    assert "insufficient privilege" not in body["error"]["mensaje"]
