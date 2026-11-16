@@ -453,6 +453,7 @@ footer.app-footer {
   align-items: center;
   justify-content: center;
 }
+
 .detalle-modal-overlay[hidden] {
   display: none;
 }
@@ -533,4 +534,61 @@ footer.app-footer {
   border: 1px solid var(--color-loading-border);
 }
 
-.carga[hidden] { display: none; }
+/* Formulario de vino */
+
+.composicion-filas {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.composicion-fila {
+  display: flex;
+  gap: var(--spacing-sm);
+  align-items: center;
+}
+
+.composicion-fila select,
+.composicion-fila input[type="text"] {
+  flex: 1;
+}
+
+.maridajes-grupo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+}
+
+.maridajes-grupo label {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  font-size: 0.9rem;
+  color: var(--color-text);
+}
+
+.alerta-exito {
+  background-color: var(--color-success-bg);
+  color: var(--color-success);
+  border-color: var(--color-success-border);
+}
+
+button:disabled,
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+[hidden] {
+  display: none;
+}
+
+/* Formulario de vino - ajustes */
+
+.form-vino h3,
+.form-vino .composicion-filas,
+.form-vino .maridajes-grupo { flex-basis: 100%; margin: var(--spacing-sm) 0 0; }
+.form-vino .composicion-fila input[type="text"] { max-width: 140px; }
+.form-vino button[type="submit"] { margin-top: var(--spacing-md); }
+
+.acciones-post { display: flex; gap: var(--spacing-md); margin-top: var(--spacing-md); }

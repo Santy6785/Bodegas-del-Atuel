@@ -6,6 +6,7 @@
  */
 
 import { iniciarCatalogo } from "./screens/catalogo.js";
+import { iniciarVinoForm } from "./screens/vino-form.js";
 import { iniciarNuevaVenta } from "./screens/nueva-venta.js";
 
 const DEFAULT_ROUTE = "#/vinos";
@@ -134,13 +135,15 @@ function resolverRuta() {
   montajeActivo?.destruir?.();
   montajeActivo = null;
 
-  actualizarNavegacion(hash);
+  const [rutaBase, query = ""] = hash.split("?");
+  const params = new URLSearchParams(query);
+  actualizarNavegacion(rutaBase);
 
-  const renderFn = rutas[hash];
+  const renderFn = rutas[rutaBase];
   if (typeof renderFn === "function") {
-    montajeActivo = renderFn(appContainer) ?? null;
+    montajeActivo = renderFn(appContainer, params) ?? null;
   } else {
-    renderNoEncontrado(appContainer, hash);
+    renderNoEncontrado(appContainer, rutaBase);
   }
 }
 
@@ -152,13 +155,9 @@ export function initRouter() {
     return iniciarCatalogo(contenedor);
   });
 
-  registrarRuta(
-    "#/vinos/nuevo",
-    crearPlaceholder(
-      "Nuevo Vino",
-      "Formulario de registro y alta en el catálogo vitivinícola. (Pendiente de implementación en issue futura)"
-    )
-  );
+  registrarRuta("#/vinos/nuevo", (contenedor) => { return iniciarVinoForm(contenedor, { modo: "alta" }); });
+
+  registrarRuta("#/vinos/editar", (contenedor, params) => { return iniciarVinoForm(contenedor, { modo: "edicion", cod: params.get("cod") }); });
 
   registrarRuta("#/ventas/nueva", (contenedor) => {
     return iniciarNuevaVenta(contenedor);

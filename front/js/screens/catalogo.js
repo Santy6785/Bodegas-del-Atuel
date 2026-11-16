@@ -119,6 +119,10 @@ function renderizarDetalle(modal, detalle, signal) {
   }, { signal });
   panel.appendChild(btnCerrar);
 
+  const btnEditar = el("a", { clase: "btn-link", texto: "Editar" });
+  btnEditar.href = `#/vinos/editar?cod=${encodeURIComponent(detalle.cod_vino)}`;
+  panel.appendChild(btnEditar);
+
   modal.hidden = false;
 }
 
@@ -256,6 +260,10 @@ export function iniciarCatalogo(contenedor) {
 
   const modal = crearModalDetalle(signal);
   contenedor.appendChild(modal);
+
+  const btnNuevo = el("a", { clase: "btn-link", texto: "Nuevo vino" });
+  btnNuevo.href = "#/vinos/nuevo";
+  contenedor.appendChild(btnNuevo);
 
   // Formulario de filtros
   const form = el("form", { clase: "filtros-form" });
