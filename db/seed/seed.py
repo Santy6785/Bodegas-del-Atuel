@@ -772,6 +772,9 @@ def recalcular_totales_comprobante(con):
 def main():
     print(f"Conectando a {DBNAME} como {USER}...")
     con = conectar()
+    if DBNAME != "bodegas_atuel_bench" and os.environ.get("SEED_PERMITIR_OTRA_BASE") != "1":
+        print(f"ERROR: seed.py solo debe ejecutarse sobre bodegas_atuel_bench (actual: {DBNAME}).", file=sys.stderr)
+        sys.exit(1)
     try:
         with con.cursor() as cur:
             cur.execute("SELECT current_user, current_database()")
