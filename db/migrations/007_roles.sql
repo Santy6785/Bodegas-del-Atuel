@@ -57,9 +57,7 @@ BEGIN
 END
 $roles$;
 
--- Asignación de contraseñas parametrizadas
-\getenv app_password APP_DB_PASSWORD
-\getenv ro_password APP_RO_PASSWORD
+-- Asignación de contraseñas parametrizadas (llegan por -v desde 00-apply-migrations.sh)
 ALTER ROLE app_rw WITH PASSWORD :'app_password';
 ALTER ROLE reportes_ro WITH PASSWORD :'ro_password';
 
