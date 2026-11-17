@@ -772,14 +772,28 @@ def recalcular_totales_comprobante(con):
 def main():
     print(f"Conectando a {DBNAME} como {USER}...")
     con = conectar()
-    if DBNAME != "bodegas_atuel_bench" and os.environ.get("SEED_PERMITIR_OTRA_BASE") != "1":
-        print(f"ERROR: seed.py solo debe ejecutarse sobre bodegas_atuel_bench (actual: {DBNAME}).", file=sys.stderr)
+    permitir_app = os.environ.get("SEED_PERMITIR_OTRA_BASE") == "1"
+    if DBNAME not in ("bodegas_atuel_bench", "bodegas_atuel") or (
+        DBNAME == "bodegas_atuel" and not permitir_app
+    ):
+        print(
+            f"ERROR: seed.py solo permite bodegas_atuel_bench o "
+            f"bodegas_atuel con SEED_PERMITIR_OTRA_BASE=1 (actual: {DBNAME}).",
+            file=sys.stderr,
+        )
         sys.exit(1)
     try:
+        # Evita duplicar la carga en ejecuciones posteriores de docker compose up.
         with con.cursor() as cur:
-            cur.execute("SELECT current_user, current_database()")
-            u, d = cur.fetchone()
-            print(f"  Usuario: {u}, Base: {d}")
+            cur.execute("SELECT COUNT(*) FROM public.vino")
+            vinos_existentes = cur.fetchone()[0]
+
+        if vinos_existentes > 0:
+            print(
+                f"[SKIP] La base {DBNAME} ya contiene "
+                f"{vinos_existentes} vinos; no se repite la carga."
+            )
+            return
 
         with con.cursor() as cur:
             cur.execute("SELECT to_regclass('public.vino')")

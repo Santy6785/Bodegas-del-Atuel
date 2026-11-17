@@ -50,7 +50,7 @@ services:
   # seed - Carga de datos iniciales (seed) en PostgreSQL
   ########################################################################
   seed:
-    profiles: ["seed"]
+    restart: "no"
     build:
       context: .
       dockerfile: db/Dockerfile.seed
@@ -61,9 +61,10 @@ services:
     environment:
       PGHOST: db
       PGPORT: 5432
-      PGDATABASE: ${SEED_DB:-bodegas_atuel_bench}
+      PGDATABASE: ${POSTGRES_DB:-bodegas_atuel}
       PGUSER: ${POSTGRES_USER:-owner_bodegas}
       PGPASSWORD: ${POSTGRES_PASSWORD:?define POSTGRES_PASSWORD en .env}
+      SEED_PERMITIR_OTRA_BASE: "1"
     networks:
       - bodegas_net
 
@@ -87,6 +88,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      seed:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/salud')"]
       interval: 30s
