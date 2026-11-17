@@ -216,6 +216,7 @@ export function iniciarTablero(contenedor) {
     }
 
     vaciar(graficoVentas);
+    vaciar(graficoVentas);
     renderFilaMensaje(tbodyVentas, 3, "Cargando...");
     try {
       const resp = await ventasPorSala(params);
@@ -225,12 +226,27 @@ export function iniciarTablero(contenedor) {
         renderFilaMensaje(tbodyVentas, 3, "Sin salas registradas");
         return;
       }
+      vaciar(graficoVentas);
+      graficoVentas.style.setProperty("--max", String(items[0].monto_total ?? 0));
       vaciar(tbodyVentas);
       items.forEach((s) => {
+        const etiquetaSala = `Sala ${s.id_sala ?? ""}`;
+        const montoTexto = `${s.monto_total ?? "0.00"}`;
+
+        const filaBarra = el("div", { clase: "barra-fila" });
+        filaBarra.appendChild(el("span", { clase: "barra-etiqueta", texto: etiquetaSala }));
+        const pista = el("div", { clase: "barra-pista" });
+        const relleno = el("div", { clase: "barra-relleno" });
+        relleno.style.setProperty("--val", String(s.monto_total ?? 0));
+        pista.appendChild(relleno);
+        filaBarra.appendChild(pista);
+        filaBarra.appendChild(el("span", { clase: "barra-valor", texto: montoTexto }));
+        graficoVentas.appendChild(filaBarra);
+
         const tr = el("tr");
-        tr.appendChild(el("td", { texto: `Sala ${s.id_sala ?? ""}` }));
+        tr.appendChild(el("td", { texto: etiquetaSala }));
         tr.appendChild(el("td", { texto: `${s.calle ?? ""} ${s.numero ?? ""}`.trim() }));
-        tr.appendChild(el("td", { texto: `$${s.monto_total ?? "0.00"}` }));
+        tr.appendChild(el("td", { texto: montoTexto }));
         tbodyVentas.appendChild(tr);
       });
     } catch (error) {

@@ -95,18 +95,18 @@ services:
   ########################################################################
   # front - Frontend Cliente (Preparado para incorporar en etapas posteriores)
   ########################################################################
-  # front:
-  #   build:
-  #     context: ./front
-  #     dockerfile: Dockerfile
-  #   container_name: bodegas-front
-  #   restart: unless-stopped
-  #   depends_on:
-  #     - api
-  #   ports:
-  #     - "${FRONT_PORT:-5173}:80"
-  #   networks:
-  #     - bodegas_net
+  front:
+    build:
+      context: ./front
+      dockerfile: Dockerfile
+    container_name: bodegas-front
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "${FRONT_PORT:-5173}:80"
+    networks:
+      - bodegas_net
 
 # Red interna para comunicación aislada entre servicios
 networks:
