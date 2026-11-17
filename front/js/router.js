@@ -10,6 +10,7 @@ import { iniciarVinoForm } from "./screens/vino-form.js";
 import { iniciarNuevaVenta } from "./screens/nueva-venta.js";
 import { iniciarTransferencias } from "./screens/transferencias.js";
 import { iniciarTablero } from "./screens/tablero.js";
+import { iniciarClientes } from "./screens/clientes.js";
 
 const DEFAULT_ROUTE = "#/vinos";
 
@@ -166,6 +167,10 @@ export function initRouter() {
   });
 
   registrarRuta("#/transferencias", (contenedor) => { return iniciarTransferencias(contenedor); });
+
+  registrarRuta("#/clientes", (contenedor) => {
+  return iniciarClientes(contenedor);
+  });
 
   registrarRuta("#/tablero", (contenedor) => { return iniciarTablero(contenedor); });
 
