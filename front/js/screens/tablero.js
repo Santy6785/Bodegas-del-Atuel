@@ -183,12 +183,13 @@ export function iniciarTablero(contenedor) {
   const errVentas = el("p", { clase: "alerta error", atributos: { role: "alert" } });
   errVentas.hidden = true;
 
+  const graficoVentas = el("div", { clase: "grafico-barras", atributos: { role: "img", "aria-label": "Gráfico de ventas por sala" } });
   const { tabla: tablaVentas, tbody: tbodyVentas } = crearTabla([
     "Sala",
     "Dirección",
     "Monto facturado",
   ]);
-  secVentasSala.append(formVentas, errVentas, tablaVentas);
+  secVentasSala.append(formVentas, errVentas, graficoVentas, tablaVentas);
   contenedor.appendChild(secVentasSala);
 
   selectPeriodo.addEventListener(
@@ -214,6 +215,7 @@ export function iniciarTablero(contenedor) {
       if (inputHasta.value) params.fecha_hasta = inputHasta.value;
     }
 
+    vaciar(graficoVentas);
     renderFilaMensaje(tbodyVentas, 3, "Cargando...");
     try {
       const resp = await ventasPorSala(params);

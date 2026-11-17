@@ -625,3 +625,10 @@ main#app > section.card + section.card { margin-top: var(--spacing-lg); }
 /* Tablero */
 .tablero-header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: var(--spacing-md); margin-bottom: var(--spacing-md); }
 .tablero-header h1 { margin-bottom: 0; }
+/* Gráfico de barras - Tablero */
+.grafico-barras { display: flex; flex-direction: column; gap: var(--spacing-sm); margin: var(--spacing-md) 0; }
+.barra-fila { display: grid; grid-template-columns: 6rem 1fr 8rem; align-items: center; gap: var(--spacing-sm); }
+.barra-etiqueta { font-weight: 600; font-size: 0.9rem; }
+.barra-pista { background-color: var(--color-bg-subtle, #f3f4f6); border: 1px solid var(--color-border); border-radius: var(--radius-sm); height: 1.25rem; overflow: hidden; }
+.barra-relleno { height: 100%; background-color: var(--color-primary); width: clamp(0%, calc((var(--val, 0) / max(var(--max, 1), 1)) * 100%), 100%); transition: width 0.3s ease; }
+.barra-valor { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; font-size: 0.9rem; }
