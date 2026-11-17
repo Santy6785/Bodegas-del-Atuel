@@ -8,6 +8,7 @@
 import { iniciarCatalogo } from "./screens/catalogo.js";
 import { iniciarVinoForm } from "./screens/vino-form.js";
 import { iniciarNuevaVenta } from "./screens/nueva-venta.js";
+import { iniciarTransferencias } from "./screens/transferencias.js";
 
 const DEFAULT_ROUTE = "#/vinos";
 
@@ -163,13 +164,7 @@ export function initRouter() {
     return iniciarNuevaVenta(contenedor);
   });
 
-  registrarRuta(
-    "#/transferencias",
-    crearPlaceholder(
-      "Transferencias de Stock",
-      "Gestión de pedidos de reposición entre depósito central y salas de venta. (Pendiente de implementación en issue futura)"
-    )
-  );
+  registrarRuta("#/transferencias", (contenedor) => { return iniciarTransferencias(contenedor); });
 
   registrarRuta(
     "#/tablero",
