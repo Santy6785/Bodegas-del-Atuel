@@ -231,7 +231,7 @@ export function iniciarTablero(contenedor) {
       vaciar(tbodyVentas);
       items.forEach((s) => {
         const etiquetaSala = `Sala ${s.id_sala ?? ""}`;
-        const montoTexto = `${s.monto_total ?? "0.00"}`;
+        const montoTexto = `$${s.monto_total ?? "0.00"}`;
 
         const filaBarra = el("div", { clase: "barra-fila" });
         filaBarra.appendChild(el("span", { clase: "barra-etiqueta", texto: etiquetaSala }));
