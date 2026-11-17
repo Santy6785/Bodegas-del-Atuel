@@ -15,6 +15,7 @@ import {
   obtenerCepas,
   obtenerBodegas,
   usandoFixtures,
+  darDeBajaVino,
 } from "../fuentes/vinos-fuente.js";
 
 const TIPOS = ["tinto", "blanco", "rosado", "espumante"];
@@ -169,8 +170,8 @@ function renderizarListado(ctx, datos) {
 
   const tabla = el("table", { clase: "tabla-vinos" });
   const thead = el("thead");
-  const filaEnc = el("tr");
-  ["Código", "Nombre", "Tipo", "Añada", "Precio", "Bodega", "Detalle"].forEach((texto) => {
+    const filaEnc = el("tr");
+  ["Código", "Nombre", "Tipo", "Añada", "Precio", "Bodega", "Acciones"].forEach((texto) => {
     filaEnc.appendChild(el("th", { texto }));
   });
   thead.appendChild(filaEnc);
@@ -195,8 +196,12 @@ function renderizarListado(ctx, datos) {
     const btnDetalle = el("button", { clase: "btn btn-sm", texto: "Detalle" });
     btnDetalle.addEventListener("click", () => ctx.onDetalle(vino.cod_vino), { signal });
     tdAccion.appendChild(btnDetalle);
-    tr.appendChild(tdAccion);
 
+    const btnEliminar = el("button", { clase: "btn btn-sm btn-peligro", texto: "Eliminar" });
+    btnEliminar.addEventListener("click", () => ctx.onEliminar(vino), { signal });
+    tdAccion.appendChild(btnEliminar);
+
+    tr.appendChild(tdAccion);
     tbody.appendChild(tr);
   });
   tabla.appendChild(tbody);
@@ -321,6 +326,22 @@ export function iniciarCatalogo(contenedor) {
         renderizarDetalle(modal, detalle, signal);
       } catch (error) {
         if (signal.aborted) return;
+        mostrarError(alerta, error.message);
+      }
+    },
+        onEliminar: async (vino) => {
+      ocultarError(alerta);
+      const confirmado = window.confirm(
+        `¿Dar de baja el vino "${vino.nombre}" (código ${vino.cod_vino})? Esta acción no se puede deshacer.`
+      );
+      if (!confirmado) return;
+      try {
+        await darDeBajaVino(vino.cod_vino);
+        if (signal.aborted) return;
+        cargarListado();
+      } catch (error) {
+        if (signal.aborted) return;
+        // Se muestra el mensaje de la API tal cual (por ejemplo, el de RN-14)
         mostrarError(alerta, error.message);
       }
     },

@@ -21,6 +21,7 @@ import {
   obtenerVino,
   listarCepas,
   listarBodegas,
+  eliminarVino,
 } from "../api/index.js";
 
 /**
@@ -75,4 +76,16 @@ export async function obtenerBodegas() {
     return listarBodegasSimulado();
   }
   return listarBodegas();
+}
+
+/**
+ * Da de baja un vino. En modo simulado no está disponible.
+ * @param {string|number} cod
+ * @returns {Promise<null>}
+ */
+export async function darDeBajaVino(cod) {
+  if (usandoFixtures()) {
+    throw new Error("La baja no está disponible en modo datos simulados.");
+  }
+  return eliminarVino(cod);
 }
