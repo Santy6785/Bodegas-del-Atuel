@@ -16,10 +16,10 @@ import { request } from "./client.js";
  * @returns {Promise<any>} Listado de vinos más vendidos.
  */
 export async function topVinos(params = {}) {
-  const limit = typeof params === "object" && params !== null ? params.limit : params;
+  const limite = typeof params === "object" && params !== null ? (params.limite ?? params.limit) : params;
   return request("/reportes/top-vinos", {
     method: "GET",
-    params: { limit }
+    params: { limite }
   });
 }
 

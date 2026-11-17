@@ -621,3 +621,7 @@ button:disabled,
 .barra-abrir input { padding: var(--spacing-xs) var(--spacing-sm); border: 1px solid var(--color-border); border-radius: var(--radius-sm); width: 10rem; }
 .nota-chica { font-size: 0.8rem; color: var(--color-text-muted); }
 main#app > section.card + section.card { margin-top: var(--spacing-lg); }
+
+/* Tablero */
+.tablero-header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: var(--spacing-md); margin-bottom: var(--spacing-md); }
+.tablero-header h1 { margin-bottom: 0; }

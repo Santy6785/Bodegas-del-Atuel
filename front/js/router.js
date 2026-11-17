@@ -9,6 +9,7 @@ import { iniciarCatalogo } from "./screens/catalogo.js";
 import { iniciarVinoForm } from "./screens/vino-form.js";
 import { iniciarNuevaVenta } from "./screens/nueva-venta.js";
 import { iniciarTransferencias } from "./screens/transferencias.js";
+import { iniciarTablero } from "./screens/tablero.js";
 
 const DEFAULT_ROUTE = "#/vinos";
 
@@ -166,13 +167,7 @@ export function initRouter() {
 
   registrarRuta("#/transferencias", (contenedor) => { return iniciarTransferencias(contenedor); });
 
-  registrarRuta(
-    "#/tablero",
-    crearPlaceholder(
-      "Tablero de Control y Reportes",
-      "Reportes de rendimiento: top vinos más vendidos, ventas por sala, quiebres de stock y trazabilidad. (Pendiente de implementación en issue futura)"
-    )
-  );
+  registrarRuta("#/tablero", (contenedor) => { return iniciarTablero(contenedor); });
 
   // Escuchar cambios de hash y resolver la ruta inicial
   window.addEventListener("hashchange", resolverRuta);
