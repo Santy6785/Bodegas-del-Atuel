@@ -7,6 +7,7 @@
  */
 
 import { montarBuscadorClientes } from "../components/buscador-clientes.js";
+import { listarSalas } from "../api/catalogos.js";
 import {
   obtenerListadoVinos,
   usandoFixtures,
@@ -16,7 +17,7 @@ import { crearComprobante } from "../api/comprobantes.js";
 /**
  * Crea un elemento, opcionalmente con clase y texto (vía textContent).
  */
-function el(tag, { clase, texto, tipo, nombre, valor, placeholder, atributos } = {}) {
+function el(tag, { clase, texto, tipo, nombre, valor, placeholder, id, atributos } = {}) {
   const elemento = document.createElement(tag);
   if (clase) elemento.className = clase;
   if (texto !== undefined) elemento.textContent = texto;
@@ -24,6 +25,7 @@ function el(tag, { clase, texto, tipo, nombre, valor, placeholder, atributos } =
   if (nombre) elemento.name = nombre;
   if (valor !== undefined) elemento.value = valor;
   if (placeholder !== undefined) elemento.placeholder = placeholder;
+  if (id) elemento.id = id;
   if (atributos) {
     for (const [key, value] of Object.entries(atributos)) {
       elemento.setAttribute(key, value);
@@ -91,59 +93,37 @@ export function iniciarNuevaVenta(contenedor) {
   const control = montarBuscadorClientes(buscador, (cliente) => {
     if (signal.aborted) return;
     clienteSeleccionado = cliente;
-    detalle.textContent = `${cliente.apellido_razon_social} (id ${cliente.id_cliente})`;
+    detalle.textContent = `${cliente.apellido_razon_social} (id ${cliente.id_cliente})` + (cliente.descuento_pct != null ? ` - descuento ${cliente.descuento_pct}%` : "");
   });
+
+  const inputCliente = buscador.querySelector("input");
+  inputCliente?.addEventListener("input", () => { if (clienteSeleccionado) { clienteSeleccionado = null; detalle.textContent = "Ninguno seleccionado"; } }, { signal });
 
   // ---------- Bloque: Sala de venta ----------
-  const bloqueSala = document.createElement("div");
-  bloqueSala.className = "bloque-sala";
-
-  const labelSala = el("label", {
-    clase: "label-sala",
-    texto: "Sala de venta:",
-    atributos: { for: "id-sala" },
-  });
-
-  const inputSala = el("input", {
-    tipo: "number",
-    id: "id-sala",
-    nombre: "id_sala",
-    valor: "",
-    placeholder: "ID de sala",
-    atributos: { min: "1", step: "1" },
-  });
-
-  const errorSala = el("p", {
-    clase: "error",
-    texto: "Ingrese un ID de sala válido",
-  });
+  const bloqueSala = el("div", { clase: "bloque-sala" });
+  const labelSala = el("label", { clase: "label-sala", texto: "Sala de venta:", atributos: { for: "id-sala" } });
+  const selectSala = el("select", { id: "id-sala", nombre: "id_sala" });
+  selectSala.appendChild(el("option", { texto: "Cargando salas...", valor: "" }));
+  const errorSala = el("p", { clase: "alerta error", atributos: { role: "alert" } });
   errorSala.hidden = true;
-
-  function validarYSigueSala() {
-    if (signal.aborted) return;
-    const valor = inputSala.value.trim();
-    if (valor === "") {
-      idSala = null;
-      errorSala.hidden = false;
-      return;
-    }
-    const entero = Number(valor);
-    if (!Number.isInteger(entero) || entero <= 0) {
-      idSala = null;
-      errorSala.hidden = false;
-      return;
-    }
-    idSala = entero;
-    errorSala.hidden = true;
-  }
-
-  inputSala.addEventListener("change", validarYSigueSala, { signal });
-  inputSala.addEventListener("blur", validarYSigueSala, { signal });
-
-  bloqueSala.appendChild(labelSala);
-  bloqueSala.appendChild(inputSala);
-  bloqueSala.appendChild(errorSala);
+  selectSala.addEventListener("change", () => { if (signal.aborted) return; idSala = selectSala.value === "" ? null : Number(selectSala.value); errorSala.hidden = true; }, { signal });
+  bloqueSala.append(labelSala, selectSala, errorSala);
   seccion.appendChild(bloqueSala);
+  async function cargarSalas() {
+    try {
+      const salas = await listarSalas();
+      if (signal.aborted) return;
+      vaciar(selectSala);
+      selectSala.appendChild(el("option", { texto: "Seleccionar sala", valor: "" }));
+      salas.forEach((s) => selectSala.appendChild(el("option", { texto: `Sala ${s.id_sala} - ${s.calle} ${s.numero}`, valor: String(s.id_sala) })));
+    } catch (error) {
+      if (signal.aborted) return;
+      vaciar(selectSala);
+      selectSala.appendChild(el("option", { texto: "No se pudieron cargar las salas", valor: "" }));
+      errorSala.textContent = error.message;
+      errorSala.hidden = false;
+    }
+  }
 
   // ---------- Bloque: Buscar vino ----------
   const bloqueBuscarVino = document.createElement("div");
@@ -156,6 +136,7 @@ export function iniciarNuevaVenta(contenedor) {
   });
 
   const inputBuscarVino = el("input", {
+    clase: "buscador-input",
     tipo: "search",
     id: "buscar-vino",
     placeholder: "Nombre del vino",
@@ -165,10 +146,10 @@ export function iniciarNuevaVenta(contenedor) {
   const listaVinos = el("ul", { clase: "resultados-vinos" });
   listaVinos.setAttribute("role", "listbox");
 
-  const errorBuscarVino = el("p", { clase: "error" });
+  const errorBuscarVino = el("p", { clase: "alerta error" });
   errorBuscarVino.hidden = true;
 
-  const errorAgregar = el("p", { clase: "error" });
+  const errorAgregar = el("p", { clase: "alerta error" });
   errorAgregar.hidden = true;
 
   let temporizadorVino = null;
@@ -182,6 +163,12 @@ export function iniciarNuevaVenta(contenedor) {
 
   function renderVinos(items) {
     limpiarListaVinos();
+    if (items.length === 0) {
+      const li = el("li", { clase: "resultado-vino" });
+      li.textContent = "Sin resultados";
+      listaVinos.appendChild(li);
+      return;
+    }
     items.forEach((v) => {
       const li = el("li", { clase: "resultado-vino" });
       li.appendChild(
@@ -191,10 +178,11 @@ export function iniciarNuevaVenta(contenedor) {
       const inputCantidad = el("input", {
         tipo: "number",
         valor: "1",
-        atributos: { min: "1", step: "1" },
+        atributos: { min: "1", step: "1", "aria-label": "Cantidad" },
       });
 
       const btnAgregar = el("button", {
+        clase: "btn btn-sm",
         texto: "Agregar",
         atributos: { type: "button" },
       });
@@ -290,7 +278,7 @@ export function iniciarNuevaVenta(contenedor) {
 
   const tituloRenglones = el("h3", { texto: "Renglones de la venta" });
 
-  const tablaRenglones = el("table", { clase: "tabla-renglones" });
+  const tablaRenglones = el("table", { clase: "tabla-renglones tabla-vinos" });
   const thead = el("thead");
   const filaEnc = el("tr");
   ["Código", "Vino", "Cantidad", "Precio unitario", "Quitar"].forEach((texto) => {
@@ -321,7 +309,7 @@ export function iniciarNuevaVenta(contenedor) {
     btnConfirmar.textContent = "No disponible en modo simulado";
   }
 
-  const errorConfirmar = el("p", { clase: "error" });
+  const errorConfirmar = el("p", { clase: "alerta error", atributos: { role: "alert" } });
   errorConfirmar.hidden = true;
 
   function mostrarErrorConfirmar(mensaje) {
@@ -343,7 +331,7 @@ export function iniciarNuevaVenta(contenedor) {
       return;
     }
     if (idSala === null || idSala === undefined) {
-      mostrarErrorConfirmar("Ingrese un ID de sala válido.");
+      mostrarErrorConfirmar("Seleccione una sala de venta.");
       return;
     }
     if (!carrito || carrito.length === 0) {
@@ -366,10 +354,9 @@ export function iniciarNuevaVenta(contenedor) {
     } catch (error) {
       if (signal.aborted) return;
       mostrarErrorConfirmar(error.message);
-    } finally {
-      if (signal.aborted) return;
-      btnConfirmar.disabled = false;
     }
+    if (signal.aborted) return;
+    btnConfirmar.disabled = usandoFixtures();
   }
 
   btnConfirmar.addEventListener("click", confirmarVenta, { signal });
@@ -390,6 +377,8 @@ export function iniciarNuevaVenta(contenedor) {
   const campoSubtotal = el("span", { clase: "campo-subtotal" });
   const campoDescuento = el("span", { clase: "campo-descuento" });
   const campoTotal = el("span", { clase: "campo-total" });
+  const campoCliente = el("span", { clase: "campo-cliente" });
+  const campoSala = el("span", { clase: "campo-sala" });
 
   const pNro = el("p");
   pNro.appendChild(el("strong", { texto: "Nro: " }));
@@ -411,10 +400,18 @@ export function iniciarNuevaVenta(contenedor) {
   pTotal.appendChild(el("strong", { texto: "Total: " }));
   pTotal.appendChild(campoTotal);
 
-  const tablaComprobante = el("table", { clase: "tabla-comprobante" });
+  const pCliente = el("p");
+  pCliente.appendChild(el("strong", { texto: "Cliente: " }));
+  pCliente.appendChild(campoCliente);
+
+  const pSala = el("p");
+  pSala.appendChild(el("strong", { texto: "Sala: " }));
+  pSala.appendChild(campoSala);
+
+  const tablaComprobante = el("table", { clase: "tabla-comprobante tabla-vinos" });
   const theadComp = el("thead");
   const filaEncComp = el("tr");
-  ["Código", "Cantidad", "Precio unitario", "Desc. %", "Subtotal"].forEach((texto) => {
+  ["C\u00f3digo", "Cantidad", "Precio unitario", "Desc. %", "Subtotal"].forEach((texto) => {
     filaEncComp.appendChild(el("th", { texto }));
   });
   theadComp.appendChild(filaEncComp);
@@ -435,6 +432,8 @@ export function iniciarNuevaVenta(contenedor) {
   seccionComprobante.appendChild(pSubtotal);
   seccionComprobante.appendChild(pDescuento);
   seccionComprobante.appendChild(pTotal);
+  seccionComprobante.appendChild(pCliente);
+  seccionComprobante.appendChild(pSala);
   seccionComprobante.appendChild(el("h3", { texto: "Renglones" }));
   seccionComprobante.appendChild(tablaComprobante);
   seccionComprobante.appendChild(btnNuevaVenta);
@@ -447,6 +446,8 @@ export function iniciarNuevaVenta(contenedor) {
     campoSubtotal.textContent = String(comprobante.subtotal ?? "");
     campoDescuento.textContent = String(comprobante.descuento ?? "");
     campoTotal.textContent = String(comprobante.total ?? "");
+    campoCliente.textContent = String(comprobante.id_cliente ?? "");
+    campoSala.textContent = String(comprobante.id_sala ?? "");
 
     while (tbodyComp.firstChild) {
       tbodyComp.removeChild(tbodyComp.firstChild);
@@ -462,6 +463,7 @@ export function iniciarNuevaVenta(contenedor) {
     });
 
     seccionComprobante.hidden = false;
+    seccionComprobante.scrollIntoView?.({ behavior: "smooth", block: "start" });
   }
 
   function ocultarComprobante() {
@@ -471,6 +473,8 @@ export function iniciarNuevaVenta(contenedor) {
     campoSubtotal.textContent = "";
     campoDescuento.textContent = "";
     campoTotal.textContent = "";
+    campoCliente.textContent = "";
+    campoSala.textContent = "";
     while (tbodyComp.firstChild) {
       tbodyComp.removeChild(tbodyComp.firstChild);
     }
@@ -512,6 +516,7 @@ export function iniciarNuevaVenta(contenedor) {
       tr.appendChild(el("td", { texto: String(r.precio) }));
       const tdQuitar = el("td");
       const btnQuitar = el("button", {
+        clase: "btn btn-sm",
         texto: "Quitar",
         atributos: { type: "button" },
       });
@@ -529,6 +534,9 @@ export function iniciarNuevaVenta(contenedor) {
       tbody.appendChild(tr);
     });
   }
+
+  renderCarrito();
+  cargarSalas();
 
   return {
     destruir() {
